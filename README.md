@@ -25,6 +25,8 @@ ModMaestro est un utilitaire en ligne de commande développé en Python. Il simp
 * **Séparation Client / Serveur** : Identification des mods strictement clients (mini-cartes, shaders, optimisations d'affichage).
 * **Export serveur** : Copie sélective des mods nécessaires vers un répertoire cible `server_mods`.
 
+Cette outils est publiques et peux être utiliser par tout le monde.
+
 ## 🇬🇧 English
 
 ### Overview
@@ -46,3 +48,4 @@ ModMaestro is a Python-based command-line tool built to streamline Minecraft mod
 * **Environment Separation**: Filters out client-only dependencies (HUDs, renderers, mini-maps).
 * **Build Automation**: Compiles a clean `server_mods` output directory.
 
+This tool is public and open for anyone to use.

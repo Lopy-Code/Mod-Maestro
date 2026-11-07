@@ -1,0 +1,3 @@
+# Facultatif : améliore le menu dans le terminal (couleurs, tableaux, barre de progression).
+# L'interface web et le moteur d'analyse n'ont AUCUNE dépendance.
+rich>=13.0

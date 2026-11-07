@@ -1,0 +1,99 @@
+{
+  "_note": "Base de connaissances modifiable. Les identifiants sont comparés en minuscules, '-' et '_' étant équivalents.",
+
+  "client_only": {
+    "_why": "Mods qui n'ont aucun rôle sur un serveur dédié (rendu, interface, minimap, aides visuelles).",
+    "ids": [
+      "sodium", "embeddium", "embeddiumplus", "rubidium", "iris", "oculus", "optifine", "optifabric",
+      "indium", "sodiumextra", "sodium_extra", "reeses_sodium_options", "sodiumoptionsapi",
+      "sodiumdynamiclights", "immediatelyfast", "entityculling", "moreculling", "badoptimizations",
+      "dynamic_fps", "dynamicfps", "modmenu", "betterf3", "lambdynlights", "lambdynamiclights",
+      "xaerominimap", "xaeroworldmap", "xaerominimapfair", "xaeroworldmapfair",
+      "litematica", "malilib", "minihud", "tweakeroo", "itemscroller",
+      "mousetweaks", "controlling", "searchables", "catalogue", "continuity",
+      "entity_texture_features", "entity_model_features", "notenoughanimations",
+      "zoomify", "fancymenu", "konkrete", "drippyloadingscreen", "skinlayers3d",
+      "presencefootsteps", "cullleaves", "citresewn", "fabricskyboxes"
+    ]
+  },
+
+  "recipe_viewers": {
+    "_why": "Visionneuses de recettes : facultatives côté serveur, beaucoup d'admins les retirent.",
+    "ids": ["jei", "emi", "roughlyenoughitems", "rei"]
+  },
+
+  "client_keywords": ["shader", "minimap", "zoom", "hud", "cosmetic", "client", "fps", "skin", "emote", "capes"],
+
+  "friendly_names": {
+    "geckolib": "GeckoLib",
+    "curios": "Curios API",
+    "architectury": "Architectury API",
+    "cloth_config": "Cloth Config API",
+    "balm": "Balm",
+    "bookshelf": "Bookshelf",
+    "kotlinforforge": "Kotlin for Forge",
+    "fabric_language_kotlin": "Fabric Language Kotlin",
+    "fabric_api": "Fabric API",
+    "patchouli": "Patchouli",
+    "terrablender": "TerraBlender",
+    "puzzleslib": "Puzzles Lib",
+    "creativecore": "CreativeCore",
+    "supermartijn642corelib": "SuperMartijn642's Core Lib",
+    "ftblibrary": "FTB Library",
+    "playeranimator": "Player Animation Lib",
+    "moonlight": "Moonlight Lib",
+    "resourcefullib": "Resourceful Lib",
+    "mixinextras": "MixinExtras",
+    "owo": "oωo",
+    "lodestone": "Lodestone",
+    "jei": "Just Enough Items",
+    "emi": "EMI",
+    "ferritecore": "FerriteCore"
+  },
+
+  "conflict_rules": [
+    {
+      "group": ["sodium", "embeddium", "rubidium"],
+      "severity": "error",
+      "title": "Plusieurs optimiseurs de rendu",
+      "message": "Sodium, Embeddium et Rubidium font le même travail : les charger ensemble provoque des conflits de mixins ou un crash au démarrage.",
+      "fix": "Garde un seul de ces mods (Embeddium sur la plupart des packs Forge/NeoForge)."
+    },
+    {
+      "a": ["optifine", "optifabric"],
+      "b": ["sodium", "embeddium", "rubidium", "iris", "oculus"],
+      "severity": "error",
+      "title": "OptiFine mélangé à un mod de rendu moderne",
+      "message": "OptiFine est connu pour être incompatible avec Sodium, Embeddium, Rubidium, Iris et Oculus.",
+      "fix": "Retire OptiFine : Sodium/Embeddium + Iris/Oculus couvrent ses fonctions (performances et shaders)."
+    },
+    {
+      "group": ["iris", "oculus"],
+      "severity": "error",
+      "title": "Deux moteurs de shaders",
+      "message": "Iris et Oculus (son équivalent Forge) ne doivent pas être présents ensemble.",
+      "fix": "Garde celui qui correspond à ton loader."
+    },
+    {
+      "group": ["lithium", "canary", "radium"],
+      "severity": "warning",
+      "title": "Plusieurs variantes de Lithium",
+      "message": "Canary et Radium sont des ports/forks de Lithium : l'un des deux suffit.",
+      "fix": "Garde une seule variante."
+    },
+    {
+      "group": ["jei", "emi", "roughlyenoughitems", "rei"],
+      "severity": "info",
+      "title": "Plusieurs visionneuses de recettes",
+      "message": "JEI, REI et EMI font le même travail. Ce n'est pas un bug, mais c'est redondant.",
+      "fix": "Garde celle que tu préfères."
+    },
+    {
+      "group": ["journeymap", "xaerominimap", "voxelmap"],
+      "severity": "info",
+      "title": "Plusieurs minimaps",
+      "message": "Plusieurs minimaps sont installées : elles se gênent à l'écran sans pour autant planter.",
+      "fix": "Garde-en une seule."
+    }
+  ]
+}

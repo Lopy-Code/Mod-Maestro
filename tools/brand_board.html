@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="fr"><meta charset="utf-8">
+<style>
+  :root{--ink:#1F1E1D;--paper:#FAF9F5;--sand:#E9E4D6;--coral:#D97757;--serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;--sans:Inter,"Segoe UI",system-ui,sans-serif;--mono:ui-monospace,Menlo,Consolas,monospace}
+  *{box-sizing:border-box} body{margin:0;width:1600px;background:var(--sand);font:16px/1.5 var(--sans);color:var(--ink);padding:48px}
+  h1{font:600 44px/1 var(--serif);margin:0;letter-spacing:-.02em} h1 span{color:var(--coral)}
+  .cap{font:600 12px var(--sans);letter-spacing:.14em;text-transform:uppercase;color:#8C8A80;margin:0 0 14px}
+  .head{display:flex;justify-content:space-between;align-items:end;margin-bottom:28px} .head p{margin:6px 0 0;color:#5E5D57}
+  .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:20px}
+  .card{background:var(--paper);border-radius:24px;padding:28px;box-shadow:0 1px 2px rgba(60,45,20,.05),0 12px 32px rgba(60,45,20,.08)}
+  .logo{grid-column:span 4;display:grid;place-items:center;background:linear-gradient(160deg,#F7F4EC,#EBE6D8)} .logo img{width:260px;height:260px}
+  .lock{grid-column:span 8;display:grid;align-content:center;gap:26px} .lock .big{width:520px}
+  .row{display:flex;gap:22px;align-items:flex-end}.row img{border-radius:12px;display:block}
+  .palette{grid-column:span 7} .sw{display:grid;grid-template-columns:repeat(6,1fr);gap:12px}
+  .sw div{border-radius:16px;height:110px;padding:12px;display:flex;flex-direction:column;justify-content:end;font:12px var(--mono)} .sw b{font:600 13px var(--sans)}
+  .type{grid-column:span 5} .type .a{font:600 54px/1.05 var(--serif);letter-spacing:-.02em} .type .b{font:500 22px var(--sans);margin-top:12px;color:#5E5D57} .type .c{font:14px var(--mono);margin-top:12px;color:#8C8A80}
+  .illus{grid-column:span 12} .il{display:grid;grid-template-columns:repeat(7,1fr);gap:14px}
+  .il div{background:#fff;border-radius:18px;padding:8px;border:1px solid #E4DFD0} .il img{width:100%;display:block}
+  .ui{grid-column:span 12;display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+  .btn{padding:11px 20px;border-radius:13px;font-weight:500;border:1px solid #D4CEBC;background:#fff} .btn.p{background:var(--coral);border-color:var(--coral);color:#fff}
+  .chip{padding:5px 13px;border-radius:99px;background:#F3F0E7;border:1px solid #E4DFD0;font-size:13.5px;font-weight:500;color:#5E5D57}
+  .pill{padding:3px 11px;border-radius:99px;font-size:13px;font-weight:600}
+</style>
+<body>
+<div class="head"><div><h1>Mod<span>Maestro</span> — direction artistique</h1><p>Papier chaud, terracotta, cubes isométriques arrondis. Calme, lisible, un peu magique.</p></div><div class="cap" style="margin:0">v1.0</div></div>
+<div class="grid">
+  <div class="card logo"><img src="../assets/logo.svg"></div>
+  <div class="card lock"><div><p class="cap">Logo horizontal</p><img class="big" src="../assets/logo-lockup.svg"></div>
+    <div><p class="cap">Tailles &amp; favicon</p><div class="row"><img src="../assets/logo-128.png" style="width:96px;height:96px"><img src="../assets/logo-64.png" style="width:64px;height:64px"><img src="../assets/logo-32.png" style="width:32px;height:32px"><img src="../assets/logo-16.png" style="width:16px;height:16px"><img src="../assets/logo-mark.svg" style="width:84px;height:84px;margin-left:30px"></div></div></div>
+  <div class="card palette"><p class="cap">Palette</p><div class="sw">
+    <div style="background:#FAF9F5;border:1px solid #E4DFD0"><b>Papier</b>#FAF9F5</div>
+    <div style="background:#E9E4D6"><b>Sable</b>#E9E4D6</div>
+    <div style="background:#D97757;color:#fff"><b>Terracotta</b>#D97757</div>
+    <div style="background:#1F1E1D;color:#fff"><b>Encre</b>#1F1E1D</div>
+    <div style="background:#92AB83;color:#fff"><b>Sauge</b>#92AB83</div>
+    <div style="background:#8FAAC4;color:#fff"><b>Ciel</b>#8FAAC4</div></div></div>
+  <div class="card type"><p class="cap">Typographie</p><div class="a">Aa Titres</div><div class="b">Corps de texte lisible — Inter / Segoe UI</div><div class="c">modid = "geckolib" · version 4.6.0</div></div>
+  <div class="card illus"><p class="cap">Illustrations d'état</p><div class="il">
+    <div><img src="../assets/illustrations/welcome.svg"></div><div><img src="../assets/illustrations/ok.svg"></div><div><img src="../assets/illustrations/duplicates.svg"></div><div><img src="../assets/illustrations/missing.svg"></div><div><img src="../assets/illustrations/conflict.svg"></div><div><img src="../assets/illustrations/server.svg"></div><div><img src="../assets/illustrations/logs.svg"></div></div></div>
+  <div class="card ui"><p class="cap" style="width:100%;margin:0 0 2px">Composants</p>
+    <span class="btn p">Analyser</span><span class="btn">Parcourir…</span><span class="chip">NeoForge</span><span class="chip">Minecraft 1.21</span>
+    <span class="pill" style="background:#F7E0D8;color:#BC4A33">Erreur</span><span class="pill" style="background:#F6E9CF;color:#A9701F">Avertissement</span><span class="pill" style="background:#E0E9F2;color:#4C6E91">Client</span><span class="pill" style="background:#E4EDDC;color:#5E7A52">Serveur</span></div>
+</div>
+</body></html>

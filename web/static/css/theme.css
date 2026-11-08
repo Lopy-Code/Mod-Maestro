@@ -436,6 +436,28 @@ button.chip { cursor: pointer; } button.chip:hover { border-color: var(--accent)
   .panel { min-height: 70vh; } .view { padding: 20px 16px 40px; } .topbar { padding: 14px 16px; flex-wrap: wrap; }
   .modal-body { grid-template-columns: 1fr; } .shortcuts { display: none; }
   .server-head, .logs-head { grid-template-columns: 1fr; } .server-head img, .logs-head img { display: none; }
-  table { font-size: 13px; } th:nth-child(3), td:nth-child(3), th:nth-child(5), td:nth-child(5) { display: none; }
+  table { font-size: 13px; } #modtable th:nth-child(3), #modtable td:nth-child(3), #modtable th:nth-child(5), #modtable td:nth-child(5) { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
+
+/* ---- Modrinth, base de connaissances ---------------------------------------------------------------------------- */
+.online-opt {
+  display: flex; gap: 14px; align-items: flex-start; margin-top: 14px; padding: 14px 16px; cursor: pointer;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md);
+}
+.online-opt:hover { border-color: var(--line-2); }
+.online-opt .switch { margin-top: 2px; }
+.online-opt small { display: block; margin-top: 4px; color: var(--ink-2); font-size: 13px; line-height: 1.5; }
+.chip.src { margin-left: 8px; padding: 1px 9px; font-size: 12px; vertical-align: middle; background: var(--info-soft); color: var(--info); border-color: transparent; }
+a.ext { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--ink-3); }
+a.ext:hover { color: var(--accent-2); border-bottom-color: var(--accent-2); }
+.issue-body .table-wrap { margin-top: 2px; }
+.card-title { font-size: 19px; }
+.muted { margin: 0; color: var(--ink-2); font-size: 14px; }
+.muted code { word-break: break-all; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 760px) { .two { grid-template-columns: 1fr; } }
+.build-card + .build-card, .build-card + .group-title { margin-top: 18px; }
+.build-card .input, .build-card select.input { width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; }
+.build-card label.field, .two > * { min-width: 0; }
+.build-card .build-line { flex-wrap: wrap; }

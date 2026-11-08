@@ -19,8 +19,11 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
-from core import __version__, builder, demo, logscan, parser, report
-from core.analyzer import Analysis, analyze, compute_plan
+import sqlite3
+
+from core import __version__, builder, demo, knowledge, learn, logscan, parser, pipeline, report
+from core.analyzer import Analysis, compute_plan
+from core.cache import get_cache
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATIC = os.path.join(ROOT, "web", "static")
@@ -107,20 +110,18 @@ def browse(path: str | None) -> dict:
 # Jobs
 # --------------------------------------------------------------------------
 
-def start_analysis(state: State, path: str) -> str:
+def start_analysis(state: State, path: str, online: bool = False) -> str:
     job_id = secrets.token_hex(6)
-    job = {"state": "running", "done": 0, "total": 0, "result": None, "error": None}
+    job = {"state": "running", "phase": "scan", "done": 0, "total": 0, "result": None, "error": None}
     state.jobs[job_id] = job
 
     def work():
         try:
-            mods_dir, notes = parser.resolve_source(path)
+            def prog(stage, done, total):
+                job["phase"], job["done"], job["total"] = stage, done, total
 
-            def prog(done, total):
-                job["done"], job["total"] = done, total
-
-            jars, extras = parser.scan_folder(mods_dir, progress=prog)
-            a = analyze(jars, extras, source=path, mods_dir=mods_dir, notes=notes)
+            a = pipeline.run_analysis(path, online=online, progress=prog, cache=get_cache())
+            mods_dir = a.mods_dir
             with state.lock:
                 state.analyses[a.id] = a
                 while len(state.analyses) > 6:
@@ -206,6 +207,12 @@ def make_handler(state: State):
                     q = {k: v[0] for k, v in parse_qs(url.query).items()}
                     if path == "/api/browse":
                         return self._json(browse(q.get("path")))
+                    if path == "/api/kb":
+                        cache = get_cache()
+                        kb = knowledge.load_all(cache)
+                        return self._json({
+                            "stats": kb["_stats"], "learned": cache.list_learned(), "cache": cache.stats(),
+                            "user_dir": knowledge.user_community_dir()})
                     if path.startswith("/api/job/"):
                         job = state.jobs.get(path.rsplit("/", 1)[-1])
                         if not job:
@@ -217,6 +224,15 @@ def make_handler(state: State):
             except Exception as exc:  # noqa: BLE001
                 traceback.print_exc()
                 return self._err(f"Erreur inattendue : {exc}", 500)
+
+        def _learn(self, body: dict) -> dict:
+            kind = body.get("kind")
+            if kind == "conflict":
+                return learn.add_conflict(get_cache(), body.get("a", ""), body.get("b", ""), body.get("note", ""),
+                                          body.get("severity") or "error")
+            if kind == "side":
+                return learn.add_side(get_cache(), body.get("a", ""), body.get("side") or "client", body.get("note", ""))
+            raise ValueError("Type inconnu : « conflict » ou « side ».")
 
         def _index(self):
             with open(os.path.join(STATIC, "index.html"), encoding="utf-8") as fh:
@@ -251,7 +267,18 @@ def make_handler(state: State):
                     p = str(body.get("path", "")).strip()
                     if not p:
                         return self._err("Indique un dossier à analyser.")
-                    return self._json({"job": start_analysis(state, p)})
+                    return self._json({"job": start_analysis(state, p, online=bool(body.get("online")))})
+                if path == "/api/learn":
+                    return self._json({"item": self._learn(body)})
+                if path == "/api/learn/delete":
+                    return self._json({"ok": learn.remove(get_cache(), int(body.get("id", 0)))})
+                if path == "/api/learn/export":
+                    return self._json({"bundle": learn.to_bundle(get_cache())})
+                if path == "/api/learn/import":
+                    return self._json(learn.import_bundle(get_cache(), body.get("bundle")))
+                if path == "/api/cache/clear":
+                    get_cache().clear_online()
+                    return self._json({"cache": get_cache().stats()})
                 if path == "/api/demo":
                     with state.lock:
                         if not state.demo_dir or not os.path.isdir(state.demo_dir):
@@ -280,10 +307,16 @@ def make_handler(state: State):
                     return self._json({"markdown": report.to_markdown(a.to_dict())})
                 if path == "/api/logscan":
                     text = body.get("text") or logscan.read_log(str(body.get("path", "")))
-                    return self._json({"findings": logscan.scan_text(text), "chars": len(text)})
+                    findings = logscan.scan_text(text)
+                    a = state.analyses.get(str(body.get("analysis")))
+                    installed = [{"modid": m["modid"], "side": m["side"]} for m in a.to_dict()["mods"]] if a else []
+                    return self._json({"findings": findings, "chars": len(text),
+                                       "suggestions": learn.suggest(findings, installed)})
                 return self._err("Introuvable.", 404)
             except (ValueError, FileExistsError, PermissionError, json.JSONDecodeError) as exc:
                 return self._err(str(exc))
+            except sqlite3.Error as exc:
+                return self._err(f"Erreur de la base locale : {exc}")
             except OSError as exc:
                 return self._err(f"Erreur disque : {exc}")
             except Exception as exc:  # noqa: BLE001

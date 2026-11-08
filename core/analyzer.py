@@ -62,6 +62,16 @@ class Analysis:
         self.notes: list[str] = []
         self.jar_count = 0
         self.total_size = 0
+        self.online: dict = {"enabled": False}  # rempli par core.enrich quand Modrinth est utilisé
+        self.kb_stats: dict = {}
+
+    def add_issue(self, issue_id, severity, category, title, message, files=(), modids=(), fix="",
+                  links=None, data=None) -> None:
+        self.issues.append({
+            "id": issue_id, "severity": severity, "category": category, "title": title,
+            "message": message, "files": list(files), "modids": list(modids), "fix": fix,
+            "links": links or [], "data": data or {},
+        })
 
     # -- sérialisation -----------------------------------------------------
     def counts(self) -> dict:
@@ -95,7 +105,7 @@ class Analysis:
             base = {
                 "file": f, "size": e["size"], "status": e["status"], "side": side["value"],
                 "side_confidence": side["confidence"], "side_reason": side["reason"],
-                "compat": e["compat"], "bundled_count": e["bundled_count"],
+                "compat": e["compat"], "bundled_count": e["bundled_count"], "online": e.get("online"),
             }
             if e["mods"]:
                 for m in e["mods"]:
@@ -121,6 +131,8 @@ class Analysis:
             "mods": mods,
             "plan": compute_plan(self),
             "notes": self.notes,
+            "online": self.online,
+            "kb": self.kb_stats,
         }
 
 
@@ -141,8 +153,11 @@ def _dominant_loader(jars: list[JarInfo]) -> str | None:
     return None
 
 
-def _active_mods(jar: JarInfo, loader: str | None) -> tuple[list[ModInfo], str]:
-    """Mods du jar pour le loader du pack + état de compatibilité (ok | fallback | mismatch)."""
+def _active_mods(jar: JarInfo, loader: str | None, bridged: tuple = ()) -> tuple[list[ModInfo], str]:
+    """Mods du jar pour le loader du pack + état (ok | fallback | bridged | mismatch).
+
+    `bridged` : loaders acceptés en plus grâce à une passerelle présente dans le pack (Sinytra Connector…).
+    """
     if not jar.mods:
         return [], "ok"
     if loader is None:
@@ -155,28 +170,46 @@ def _active_mods(jar: JarInfo, loader: str | None) -> tuple[list[ModInfo], str]:
     mods = [m for m in jar.mods if m.loader in fallback]
     if mods:
         return mods, "fallback"
+    mods = [m for m in jar.mods if m.loader in bridged]
+    if mods:
+        return mods, "bridged"
     first = jar.mods[0].loader
     return [m for m in jar.mods if m.loader == first], "mismatch"
 
 
-def _classify_side(mods: list[ModInfo], kb: dict) -> dict:
+def _classify_side(mods: list[ModInfo], kb: dict, info: dict | None = None) -> dict:
+    """Côté client/serveur d'un fichier. Ordre de confiance :
+
+    déclaré par le mod > « à garder » forcé (base de connaissances) > Modrinth (« non pris en charge »)
+    > mod client connu > visionneuse de recettes > Modrinth (« prend en charge le serveur ») > mots-clés.
+    """
     none = {"value": "both", "confidence": None, "reason": None}
-    if not mods:
+    if not mods and not info:
         return none
-    if all(m.env == "client" for m in mods):
+    if mods and all(m.env == "client" for m in mods):
         return {"value": "client", "confidence": "declared",
                 "reason": mods[0].env_reason or "Déclaré côté client dans les métadonnées"}
-    if all(m.env == "server" for m in mods):
+    if mods and all(m.env == "server" for m in mods):
         return {"value": "server", "confidence": "declared",
                 "reason": mods[0].env_reason or "Déclaré côté serveur dans les métadonnées"}
+    force = {norm(i) for i in kb.get("force_both", [])}
+    if mods and any(norm(m.modid) in force for m in mods):
+        return {"value": "both", "confidence": "known", "reason": "Marqué « à garder sur le serveur » dans la base de connaissances"}
+    cs, ss = (info or {}).get("client_side"), (info or {}).get("server_side")
+    if info and ss == "unsupported" and cs != "unsupported":
+        return {"value": "client", "confidence": "modrinth", "reason": "Modrinth : ce mod ne fonctionne pas côté serveur"}
+    if info and cs == "unsupported" and ss != "unsupported":
+        return {"value": "server", "confidence": "modrinth", "reason": "Modrinth : ce mod ne fonctionne pas côté client"}
     client_ids = {norm(i) for i in kb.get("client_only", {}).get("ids", [])}
-    if all(norm(m.modid) in client_ids for m in mods):
+    if mods and all(norm(m.modid) in client_ids for m in mods):
         return {"value": "client", "confidence": "known",
                 "reason": "Mod connu pour ne servir que côté client (rendu, interface, minimap…)"}
     viewers = {norm(i) for i in kb.get("recipe_viewers", {}).get("ids", [])}
-    if any(norm(m.modid) in viewers for m in mods):
+    if mods and any(norm(m.modid) in viewers for m in mods):
         return {"value": "unsure", "confidence": "probable",
                 "reason": "Visionneuse de recettes : facultative sur un serveur"}
+    if info and ss in ("required", "optional"):
+        return {"value": "both", "confidence": "modrinth", "reason": "Modrinth : prend en charge le serveur"}
     for m in mods:
         text = f"{m.modid} {m.name}".lower()
         tokens = set(re.split(r"[^a-z0-9]+", text))
@@ -188,19 +221,31 @@ def _classify_side(mods: list[ModInfo], kb: dict) -> dict:
 
 
 def analyze(jars: list[JarInfo], extras: dict | None = None, source: str = "", mods_dir: str = "",
-            notes: list[str] | None = None, knowledge: dict | None = None) -> Analysis:
+            notes: list[str] | None = None, knowledge: dict | None = None,
+            online: dict | None = None) -> Analysis:
+    """`online` : nom de fichier → info Modrinth (voir core.modrinth.identify), facultatif."""
     kb = knowledge or load_knowledge()
+    online = online or {}
     a = Analysis(source or mods_dir, mods_dir or source)
     a.notes = list(notes or [])
+    a.kb_stats = kb.get("_stats", {})
     a.jar_count = len(jars)
     a.total_size = sum(j.size for j in jars)
     a.loader = _dominant_loader(jars)
     loader_label = LOADER_LABELS.get(a.loader or "", "le loader")
 
+    # --- passerelles de loader (ex. Sinytra Connector : mods Fabric sur NeoForge) -----------------
+    present_ids = {norm(m.modid) for j in jars for m in j.mods}
+    bridged: dict[str, str] = {}  # loader accepté en plus -> nom de la passerelle
+    for br in kb.get("loader_bridges", []):
+        if br.get("loader") == a.loader and norm(br.get("id", "")) in present_ids:
+            for accepted in br.get("accepts", []):
+                bridged[accepted] = br.get("name", br["id"])
+
     active: dict[str, list[ModInfo]] = {}
     compat: dict[str, str] = {}
     for j in jars:
-        mods, state = _active_mods(j, a.loader)
+        mods, state = _active_mods(j, a.loader, tuple(bridged))
         active[j.file], compat[j.file] = mods, state
 
     # --- index des fournisseurs ------------------------------------------
@@ -244,12 +289,7 @@ def analyze(jars: list[JarInfo], extras: dict | None = None, source: str = "", m
         n = norm(modid)
         return n in _PLATFORM_N or n in providers or n in bundled_ids
 
-    def add(issue_id, severity, category, title, message, files=(), modids=(), fix="", links=None, data=None):
-        a.issues.append({
-            "id": issue_id, "severity": severity, "category": category, "title": title,
-            "message": message, "files": list(files), "modids": list(modids), "fix": fix,
-            "links": links or [], "data": data or {},
-        })
+    add = a.add_issue
 
     def display(modid: str) -> str:
         return kb.get("friendly_names", {}).get(norm(modid), modid)
@@ -276,6 +316,12 @@ def analyze(jars: list[JarInfo], extras: dict | None = None, source: str = "", m
                 "(ou de planter) s'il n'existe pas en version NeoForge.",
                 files=[j.file], modids=[m.modid for m in active[j.file]],
                 fix="Cherche la version NeoForge de ce mod.")
+        elif compat[j.file] == "bridged":
+            via = bridged.get(active[j.file][0].loader, "une passerelle")
+            add(f"loader:{j.file}", "info", "files", f"Mod {LOADER_LABELS.get(active[j.file][0].loader)} chargé via {via} : {j.file}",
+                f"Ce mod n'est pas conçu pour {loader_label}, mais {via} est présent dans le pack et sait en faire "
+                "tourner beaucoup. Ce n'est pas garanti pour tous : si le jeu plante, ce mod est un suspect de choix.",
+                files=[j.file], modids=[m.modid for m in active[j.file]])
 
     if extras:
         if extras.get("disabled"):
@@ -408,9 +454,11 @@ def analyze(jars: list[JarInfo], extras: dict | None = None, source: str = "", m
             fb = [g for g in rule.get("b", []) if norm(g) in present]
             found, hit = fa + fb, bool(fa and fb)
         if hit:
+            src = rule.get("source")
             add(f"known:{k}", rule.get("severity", "warning"), "compat", rule["title"],
-                rule["message"] + " Présents : " + ", ".join(found) + ".",
-                files=sorted({present[norm(g)] for g in found}), modids=found, fix=rule.get("fix", ""))
+                rule["message"] + " Présents : " + ", ".join(found) + "." + (f" (source : {src})" if src else ""),
+                files=sorted({present[norm(g)] for g in found}), modids=found, fix=rule.get("fix", ""),
+                data={"source": src} if src else None)
 
     # --- version de Minecraft (le calcul a eu lieu plus haut) --------------------------------
     best = a.mc_version
@@ -432,8 +480,9 @@ def analyze(jars: list[JarInfo], extras: dict | None = None, source: str = "", m
     # --- fiches par fichier + plan serveur ------------------------------------------------------
     for j in jars:
         mods = active[j.file]
-        side = _classify_side(mods, kb) if compat[j.file] != "mismatch" else {"value": "both", "confidence": None, "reason": None}
-        if j.status == "no-metadata":
+        side = (_classify_side(mods, kb, online.get(j.file)) if compat[j.file] != "mismatch"
+                else {"value": "both", "confidence": None, "reason": None})
+        if j.status == "no-metadata" and side["confidence"] is None:
             side = {"value": "unsure", "confidence": "probable",
                     "reason": "Sans métadonnées : bibliothèque ou mod ancien — à vérifier"}
         required = sorted({
@@ -449,7 +498,7 @@ def analyze(jars: list[JarInfo], extras: dict | None = None, source: str = "", m
             server = {"action": "remove", "kind": "loader", "reason": f"Conçu pour un autre loader que {loader_label}", "unsure": False}
         elif j.file in dup_losers:
             server = {"action": "remove", "kind": "duplicate", "reason": "Doublon : version plus ancienne", "unsure": False}
-        elif side["value"] == "client" and side["confidence"] in ("declared", "known"):
+        elif side["value"] == "client" and side["confidence"] in ("declared", "known", "modrinth"):
             server = {"action": "remove", "kind": "client", "reason": side["reason"], "unsure": False}
         elif side["value"] == "unsure":
             server = {"action": "keep", "kind": "unsure", "reason": side["reason"], "unsure": True}

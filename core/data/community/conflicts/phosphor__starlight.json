@@ -1,0 +1,11 @@
+{
+  "group": [
+    "starlight",
+    "phosphor"
+  ],
+  "severity": "warning",
+  "title": "Deux moteurs d'éclairage",
+  "message": "Starlight et Phosphor réécrivent tous deux le calcul de la lumière : ils font le même travail et se marchent dessus.",
+  "fix": "Ne garde que l'un des deux.",
+  "source": "ModMaestro (entrée de départ)"
+}

@@ -6,11 +6,14 @@
     python main.py --cli [DOSSIER]    menu interactif dans le terminal
     python main.py --demo             crée un faux modpack pour essayer
     python main.py --audit DOSSIER    audit rapide, sans interface (code retour 1 si erreurs)
+    ajoute --online pour interroger Modrinth (facultatif : seules les empreintes SHA-1 sont envoyées)
+    python main.py --kb               affiche ta base personnelle ; --export-kb FICHIER / --import-kb FICHIER
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 import tempfile
@@ -21,8 +24,8 @@ if sys.version_info < (3, 11):
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from core import __version__, builder, demo, logscan, parser, report  # noqa: E402
-from core.analyzer import analyze  # noqa: E402
+from core import __version__, builder, demo, learn, logscan, parser, pipeline, report  # noqa: E402
+from core.cache import get_cache  # noqa: E402
 
 try:  # `rich` est facultatif : sans lui, on garde un affichage simple
     from rich.console import Console
@@ -77,15 +80,29 @@ class UI:
         else:
             print(LOGO + f"\n  Le chef d'orchestre de ton modpack Minecraft — v{__version__}\n")
 
-    def scan(self, folder):
+    def run(self, path, online=False):
+        """Lance l'analyse (pipeline commun avec l'interface web) avec une barre de progression."""
+        labels = {"scan": "Lecture des mods", "hash": "Calcul des empreintes", "query": "Interrogation de Modrinth",
+                  "projects": "Fiches Modrinth", "updates": "Mises à jour"}
         if not self.c:
-            result = parser.scan_folder(folder, progress=lambda d, t: print(f"\r  Lecture {d}/{t}", end="", flush=True))
-            print()
-            return result
-        with Progress(TextColumn("[#D97757]Lecture des mods"), BarColumn(complete_style="#D97757"),
+            last = {"stage": None}
+
+            def plain(stage, done, total):
+                if stage != last["stage"] and last["stage"]:
+                    print()
+                last["stage"] = stage
+                print(f"\r  {labels.get(stage, stage)} {done}/{total}", end="", flush=True)
+            try:
+                return pipeline.run_analysis(path, online=online, progress=plain)
+            finally:
+                print()
+        with Progress(TextColumn("[#D97757]{task.description}"), BarColumn(complete_style="#D97757"),
                       TaskProgressColumn(), console=self.c, transient=True) as pr:
-            task = pr.add_task("", total=None)
-            return parser.scan_folder(folder, progress=lambda d, t: pr.update(task, total=t, completed=d))
+            task = pr.add_task("Lecture des mods", total=None)
+
+            def fancy(stage, done, total):
+                pr.update(task, description=labels.get(stage, stage), total=total, completed=done)
+            return pipeline.run_analysis(path, online=online, progress=fancy)
 
 
 def _plain(msg: str) -> str:
@@ -97,11 +114,9 @@ def _plain(msg: str) -> str:
 # Actions
 # --------------------------------------------------------------------------
 
-def load(ui: UI, path: str):
-    folder, notes = parser.resolve_source(path)
-    jars, extras = ui.scan(folder)
-    a = analyze(jars, extras, source=path, mods_dir=folder, notes=notes)
-    for n in notes:
+def load(ui: UI, path: str, online: bool = False):
+    a = ui.run(path, online)
+    for n in a.notes:
         ui.say(f"[dim]{n}[/]")
     return a
 
@@ -111,7 +126,12 @@ def show_summary(ui: UI, a):
     c = d["counts"]
     ui.say(f"\n[bold]{d['loader_label']}[/]" + (f" · Minecraft {d['mc_version']}" if d["mc_version"] else "")
            + f" · {c['mods']} mods dans {c['jars']} fichiers · santé [bold]{d['score']}/100[/]")
-    ui.say(f"[red]{c['errors']} erreur(s)[/] · [yellow]{c['warnings']} avertissement(s)[/] · [blue]{c['infos']} info(s)[/]\n")
+    ui.say(f"[red]{c['errors']} erreur(s)[/] · [yellow]{c['warnings']} avertissement(s)[/] · [blue]{c['infos']} info(s)[/]")
+    o = d.get("online") or {}
+    if o.get("enabled"):
+        ui.say(f"[dim]Modrinth : {o.get('identified', 0)}/{o.get('total', 0)} mods reconnus"
+               + (f" · {o['updates']} mise(s) à jour" if o.get("updates") else "") + "[/]")
+    ui.say()
     return d
 
 
@@ -189,6 +209,38 @@ def do_logs(ui: UI, a=None):
         ui.say()
 
 
+def do_learn(ui: UI, a):
+    """Enregistre un conflit ou un mod « client » dans ta base personnelle (stockée sur ton ordinateur)."""
+    cache = get_cache()
+    ids = sorted({m["modid"] for m in a.to_dict()["mods"] if m["modid"]})
+    ui.say("[bold]Ma base[/]  [dim](stockée sur ton ordinateur, appliquée à toutes tes prochaines analyses)[/]")
+    for r in cache.list_learned():
+        what = f"{r['a']} ↔ {r['b']}" if r["kind"] == "conflict" else f"{r['a']} ({r['side']})"
+        ui.say(f"  [dim]#{r['id']}[/] {what}" + (f"  [dim]{r['note']}[/]" if r["note"] else ""))
+    ui.say("\n  [bold]1[/] Ajouter un conflit   [bold]2[/] Marquer un mod « client uniquement »   "
+           "[bold]3[/] Marquer un mod « à garder sur le serveur »   [bold]4[/] Supprimer une entrée   [bold]0[/] Retour")
+    choice = ui.ask("Ton choix", "0")
+    try:
+        if choice == "1":
+            x = ui.ask("Premier mod (identifiant)")
+            y = ui.ask("Second mod (identifiant)")
+            note = ui.ask("Note (facultative)", "")
+            sev = ui.ask("Gravité (error / warning / info)", "error")
+            learn.add_conflict(cache, x, y, note, sev)
+        elif choice in ("2", "3"):
+            ui.say("[dim]Mods du pack : " + ", ".join(ids[:30]) + (" …" if len(ids) > 30 else "") + "[/]")
+            learn.add_side(cache, ui.ask("Mod (identifiant)"), "client" if choice == "2" else "both", ui.ask("Note (facultative)", ""))
+        elif choice == "4":
+            ui.say("[green]✓ Supprimée.[/]" if learn.remove(cache, int(ui.ask("Numéro de l'entrée"))) else "[yellow]Aucune entrée avec ce numéro.[/]")
+            return
+        else:
+            return
+    except ValueError as exc:
+        ui.say(f"[red]{exc}[/]\n")
+        return
+    ui.say("[green]✓ Enregistré.[/] Relance l'analyse (choix 9) pour l'appliquer.\n")
+
+
 def export_report(ui: UI, a):
     dest = ui.ask("Enregistrer le rapport sous", os.path.join(os.path.dirname(a.mods_dir), "rapport-modmaestro.md"))
     try:
@@ -203,7 +255,7 @@ def export_report(ui: UI, a):
 # Menu interactif
 # --------------------------------------------------------------------------
 
-def cli_menu(path: str | None):
+def cli_menu(path: str | None, online: bool = False):
     ui = UI()
     ui.banner()
     a = None
@@ -213,7 +265,7 @@ def cli_menu(path: str | None):
             path = demo.build_demo(os.path.join(tempfile.mkdtemp(prefix="modmaestro_demo_"), "modpack_demo"))
             ui.say(f"[dim]Modpack de démo créé : {path}[/]")
         try:
-            a = load(ui, path)
+            a = load(ui, path, online)
         except ValueError as exc:
             ui.say(f"[red]{exc}[/]\n")
             path = None
@@ -228,6 +280,9 @@ def cli_menu(path: str | None):
         ("6", "Analyser un journal de crash"),
         ("7", "Exporter le rapport (.md)"),
         ("8", "Analyser un autre dossier"),
+        ("9", "Relancer l'analyse" + (" (Modrinth activé)" if online else "")),
+        ("m", "Ma base : conflits et mods client appris"),
+        ("o", "Activer / désactiver Modrinth (actuellement : " + ("activé" if online else "désactivé") + ")"),
         ("0", "Quitter"),
     ]
     while True:
@@ -251,7 +306,18 @@ def cli_menu(path: str | None):
         elif choice == "7":
             export_report(ui, a)
         elif choice == "8":
-            return cli_menu(None)
+            return cli_menu(None, online)
+        elif choice == "9":
+            return cli_menu(a.source, online)
+        elif choice.lower() == "m":
+            do_learn(ui, a)
+        elif choice.lower() == "o":
+            if online:
+                online = False
+            else:
+                ui.say("Modrinth reçoit [bold]uniquement l'empreinte SHA-1[/] de chaque .jar (jamais les noms de fichiers ni ton dossier).")
+                online = ui.confirm("Activer Modrinth pour la prochaine analyse ?", default=False)
+            ui.say("Modrinth : " + ("[green]activé[/]" if online else "désactivé") + " — choisis 9 pour relancer l'analyse.\n")
         elif choice == "0":
             ui.say("À bientôt !")
             return 0
@@ -259,10 +325,33 @@ def cli_menu(path: str | None):
             ui.say("[yellow]Choix inconnu.[/]\n")
 
 
-def quick_audit(path: str) -> int:
+def kb_command(args) -> int:
+    cache = get_cache()
+    if args.import_kb:
+        try:
+            with open(args.import_kb, encoding="utf-8") as fh:
+                res = learn.import_bundle(cache, json.load(fh))
+        except (OSError, ValueError) as exc:
+            print(f"Import impossible : {exc}", file=sys.stderr)
+            return 2
+        print(f"{res['added']} entrée(s) importée(s)." + (f" {len(res['errors'])} ignorée(s) : " + " ".join(res["errors"][:3]) if res["errors"] else ""))
+    if args.export_kb:
+        with open(args.export_kb, "w", encoding="utf-8") as fh:
+            json.dump(learn.to_bundle(cache), fh, ensure_ascii=False, indent=2)
+        print(f"Base exportée : {args.export_kb}")
+    if not (args.import_kb or args.export_kb):
+        rows = cache.list_learned()
+        for r in rows:
+            print(f"#{r['id']:<3} {r['kind']:<8} {r['a']}" + (f" ↔ {r['b']}" if r["b"] else f" ({r['side']})") + (f"  — {r['note']}" if r["note"] else ""))
+        if not rows:
+            print("Ta base est vide. Ajoute des entrées depuis l'interface (onglet « Ma base ») ou le menu (touche m).")
+    return 0
+
+
+def quick_audit(path: str, online: bool = False) -> int:
     ui = UI()
     try:
-        a = load(ui, path)
+        a = load(ui, path, online)
     except ValueError as exc:
         print(exc, file=sys.stderr)
         return 2
@@ -277,10 +366,18 @@ def main(argv=None) -> int:
     ap.add_argument("--cli", action="store_true", help="menu dans le terminal plutôt que l'interface web")
     ap.add_argument("--audit", action="store_true", help="audit rapide non interactif")
     ap.add_argument("--demo", action="store_true", help="crée un modpack de démonstration et l'ouvre")
+    ap.add_argument("--online", action="store_true",
+                    help="interroge Modrinth (envoie uniquement les empreintes SHA-1 des .jar) — désactivé par défaut")
+    ap.add_argument("--kb", action="store_true", help="affiche ta base personnelle (conflits et mods client appris)")
+    ap.add_argument("--export-kb", metavar="FICHIER", help="exporte ta base personnelle dans un fichier .json")
+    ap.add_argument("--import-kb", metavar="FICHIER", help="importe une base .json (rien n'est envoyé nulle part)")
     ap.add_argument("--port", type=int, default=8765, help="port de l'interface web (défaut : 8765)")
     ap.add_argument("--no-browser", action="store_true", help="ne pas ouvrir le navigateur automatiquement")
     ap.add_argument("--version", action="version", version=f"ModMaestro {__version__}")
     args = ap.parse_args(argv)
+
+    if args.kb or args.export_kb or args.import_kb:
+        return kb_command(args)
 
     path = args.path
     if args.demo:
@@ -290,9 +387,9 @@ def main(argv=None) -> int:
     if args.audit:
         if not path:
             ap.error("--audit demande un dossier")
-        return quick_audit(path)
+        return quick_audit(path, args.online)
     if args.cli:
-        return cli_menu(path) or 0
+        return cli_menu(path, args.online) or 0
 
     from web.server import serve
     serve(initial_path=path, port=args.port, open_browser=not args.no_browser)

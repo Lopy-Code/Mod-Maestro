@@ -25,11 +25,18 @@
   const SIDE = { client: "Client", server: "Serveur", both: "Les deux", unsure: "À vérifier" };
   const CATS = [
     ["all", "Tout"], ["duplicates", "Doublons"], ["dependencies", "Dépendances"],
-    ["versions", "Versions"], ["compat", "Compatibilité"], ["files", "Fichiers"],
+    ["versions", "Versions"], ["compat", "Compatibilité"], ["updates", "Mises à jour"], ["files", "Fichiers"],
   ];
   
+  const PHASE = {
+    scan: "Lecture des fichiers", hash: "Calcul des empreintes", query: "Interrogation de Modrinth",
+    projects: "Récupération des fiches Modrinth", updates: "Recherche de mises à jour",
+  };
+  const readFlag = () => { try { return localStorage.getItem("mm-online") === "1"; } catch { return false; } };
+  const safeUrl = (u) => (/^https:\/\//.test(u || "") ? u : "#");
   const S = {
-    view: "home", a: null, filter: "all", q: "", side: "all",
+    view: "home", online: readFlag(), kb: null, kbErr: "", learnErr: "", learnOk: false, importMsg: "",
+    learnForm: newLearn(), a: null, filter: "all", q: "", side: "all",
     overrides: {}, plan: null, bytes: 0, buildResult: null, buildError: "",
     busy: null, homeError: "", logs: { text: "", path: "", findings: null, error: "" },
   };
@@ -66,10 +73,10 @@
     S.busy = { done: 0, total: 0 };
     go("home");
     try {
-      const { job } = await api(demo ? "/api/demo" : "/api/analyze", demo ? {} : { path });
+      const { job } = await api(demo ? "/api/demo" : "/api/analyze", demo ? {} : { path, online: S.online });
       for (;;) {
         const j = await api(`/api/job/${job}`);
-        S.busy = { done: j.done, total: j.total };
+        S.busy = { done: j.done, total: j.total, phase: j.phase };
         updateProgress();
         if (j.state === "done") { loadResult(j.result); return; }
         if (j.state === "error") throw new Error(j.error);
@@ -93,9 +100,9 @@
   function updateProgress() {
     const bar = $("#pbar"), lab = $("#plabel");
     if (!bar) return;
-    const { done, total } = S.busy || {};
+    const { done, total, phase } = S.busy || {};
     if (total) { bar.style.width = `${Math.round((done / total) * 100)}%`; bar.parentElement.classList.remove("indeterminate"); }
-    if (lab) lab.textContent = total ? `Lecture des fichiers… ${done} / ${total}` : "Recherche des fichiers .jar…";
+    if (lab) lab.textContent = total ? `${PHASE[phase] || "Analyse"}… ${done} / ${total}` : "Recherche des fichiers .jar…";
   }
 
   /* ---- Navigation --------------------------------------------------------------- */
@@ -119,15 +126,16 @@
   function go(view) {
     S.view = view; updateNav(); render();
     $("#view").scrollTop = 0;
+    if (view === "base") loadKb();
   }
 
-  const titles = { audit: "Audit du modpack", mods: "Liste des mods", server: "Dossier serveur", logs: "Journal de crash" };
+  const titles = { audit: "Audit du modpack", mods: "Liste des mods", server: "Dossier serveur", logs: "Journal de crash", base: "Ma base de connaissances" };
 
   function render() {
     const v = $("#view");
     $("#crumb-title").textContent = titles[S.view] || "";
     if (S.a) $("#crumb-path").textContent = S.a.mods_dir;
-    const fn = { home: viewHome, audit: viewAudit, mods: viewMods, server: viewServer, logs: viewLogs }[S.view];
+    const fn = { home: viewHome, audit: viewAudit, mods: viewMods, server: viewServer, logs: viewLogs, base: viewBase }[S.view];
     v.innerHTML = fn();
     bind();
   }
@@ -146,12 +154,17 @@
             <button class="btn" id="browse" ${busy ? "disabled" : ""}>Parcourir…</button>
             <button class="btn primary" id="go" ${busy ? "disabled" : ""}>Analyser</button>
           </div>
+          <label class="online-opt">
+            <span class="switch"><input type="checkbox" id="online" ${S.online ? "checked" : ""} ${busy ? "disabled" : ""} aria-label="Interroger Modrinth"></span>
+            <span><b>Interroger Modrinth</b> <span class="chip">en ligne · facultatif</span>
+              <small>Reconnaît tes mods, fiabilise le tri client/serveur, trouve des incompatibilités et des mises à jour. Seule l'<b>empreinte (SHA-1)</b> de chaque .jar est envoyée : jamais les noms de fichiers ni ton dossier.</small></span>
+          </label>
           ${busy ? `<div class="progress"><div class="progress-bar indeterminate"><i id="pbar"></i></div><div class="progress-label" id="plabel">Recherche des fichiers .jar…</div></div>` : ""}
           ${S.homeError ? `<div class="err-box">${esc(S.homeError)}</div>` : ""}
           <div class="home-actions">
             <button class="link-btn" id="demo" ${busy ? "disabled" : ""}>Essayer avec un modpack de démonstration →</button>
           </div>
-          <p class="hint">Tout reste sur ton ordinateur : rien n'est envoyé sur Internet, et ton dossier d'origine n'est jamais modifié.</p>
+          <p class="hint">Par défaut, tout reste sur ton ordinateur et ton dossier d'origine n'est jamais modifié. Modrinth est la seule exception, et seulement si tu l'actives ci-dessus.</p>
         </div>
         <img class="hero-art" src="/assets/hero.svg" alt="">
       </div>
@@ -165,6 +178,14 @@
   }
 
   /* ---- Vue : audit ------------------------------------------------------------------------- */
+  const srcChip = (i) => {
+    const src = i.data && i.data.source;
+    if (!src) return "";
+    return src === "modrinth" ? '<span class="chip src" title="Donnée issue de Modrinth">Modrinth</span>'
+      : `<span class="chip src" title="${esc(src)}">Base de connaissances</span>`;
+  };
+  const updatesTable = (u) => (u && u.length ? `<div class="table-wrap"><table><thead><tr><th>Mod</th><th>Installée</th><th>Disponible</th><th></th></tr></thead><tbody>${u.map((x) => `<tr><td class="nm">${esc(x.name)}</td><td>${esc(x.current)}</td><td>${esc(x.latest)}</td><td><a class="ext" href="${esc(safeUrl(x.url))}" target="_blank" rel="noopener noreferrer">Modrinth ↗</a></td></tr>`).join("")}</tbody></table></div>` : "");
+
   function viewAudit() {
     const a = S.a, c = a.counts;
     const circ = 2 * Math.PI * 54;
@@ -177,13 +198,14 @@
       <details class="issue ${i.severity}" ${list.length <= 3 ? "open" : ""}>
         <summary>
           <span class="sev" title="${SEV[i.severity]}">${ICON[i.severity]}</span>
-          <div class="issue-main"><div class="issue-title">${esc(i.title)}</div><div class="issue-msg">${esc(i.message)}</div></div>
+          <div class="issue-main"><div class="issue-title">${esc(i.title)}${srcChip(i)}</div><div class="issue-msg">${esc(i.message)}</div></div>
           ${ICON.caret}
         </summary>
         <div class="issue-body">
           ${i.fix ? `<div class="fix"><b>À faire :</b> ${esc(i.fix)}</div>` : ""}
           ${i.files.length ? `<div class="files">${i.files.map((f) => `<span class="chip mono">${esc(f)}</span>`).join("")}</div>` : ""}
-          ${i.links.length ? `<div class="links">${i.links.map((l) => `<a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">Chercher sur ${esc(l.label)} ↗</a>`).join("")}</div>` : ""}
+          ${i.links.length ? `<div class="links">${i.links.map((l) => `<a href="${esc(safeUrl(l.url))}" target="_blank" rel="noopener noreferrer">Chercher sur ${esc(l.label)} ↗</a>`).join("")}</div>` : ""}
+          ${updatesTable(i.data && i.data.updates)}
         </div>
       </details>`).join("");
 
@@ -205,6 +227,9 @@
             <span class="chip">${plural(c.mods, "mod", "mods")} · ${plural(c.jars, "fichier", "fichiers")}</span>
             ${c.bundled ? `<span class="chip">${c.bundled} intégré${c.bundled > 1 ? "s" : ""} (jar-in-jar)</span>` : ""}
             <span class="chip">${size(c.size)}</span>
+            ${a.online && a.online.enabled
+              ? `<span class="chip accent" title="Fichiers reconnus par empreinte SHA-1">Modrinth : ${a.online.identified}/${a.online.total} reconnus</span>`
+              : `<span class="chip" title="Active « Interroger Modrinth » sur l'accueil pour des résultats plus précis">Hors ligne</span>`}
           </div>
           ${a.notes.length ? `<div class="notes">${a.notes.map(esc).join(" · ")}</div>` : ""}
         </div>
@@ -251,7 +276,7 @@
       <div class="table-wrap"><table>
         <thead><tr><th>Mod</th><th>Version</th><th>Loader</th><th>Côté</th><th>Fichier</th></tr></thead>
         <tbody>${shown.map((m) => `<tr>
-          <td><div class="nm">${esc(m.name)}</div>${m.modid ? `<div class="id">${esc(m.modid)}</div>` : ""}</td>
+          <td><div class="nm">${m.online ? `<a class="ext" href="${esc(safeUrl(m.online.url))}" target="_blank" rel="noopener noreferrer" title="Voir sur Modrinth">${esc(m.name)}</a>` : esc(m.name)}</div>${m.modid ? `<div class="id">${esc(m.modid)}</div>` : ""}</td>
           <td>${esc(m.version || "—")}</td>
           <td>${m.loader ? esc(m.loader) : '<span class="pill bad">illisible</span>'}</td>
           <td><span class="pill ${m.side}" title="${esc(m.side_reason || "")}">${SIDE[m.side]}</span></td>
@@ -346,10 +371,11 @@
     const L = S.logs, found = (S.a && S.a.logs) || [];
     const fmt = (s) => ({ error: "Erreur", warning: "Avertissement", info: "Info" }[s]);
     const results = L.findings === null ? "" : L.findings.length
-      ? `<div class="issues" style="margin-top:22px">${L.findings.map((f) => `
+      ? `<div class="issues" style="margin-top:22px">${L.findings.map((f, idx) => `
         <details class="issue ${f.severity}" open><summary><span class="sev" title="${fmt(f.severity)}">${ICON[f.severity]}</span>
           <div class="issue-main"><div class="issue-title">${esc(f.title)}</div><div class="issue-msg">${esc(f.message)}</div></div>${ICON.caret}</summary>
-          ${f.fix ? `<div class="issue-body"><div class="fix"><b>À faire :</b> ${esc(f.fix)}</div></div>` : ""}</details>`).join("")}</div>`
+          <div class="issue-body">${f.fix ? `<div class="fix"><b>À faire :</b> ${esc(f.fix)}</div>` : ""}
+            ${(L.suggestions || []).some((x) => x.finding === idx) ? `<div><button class="btn sm" data-sugg="${idx}">Enregistrer dans ma base…</button></div>` : ""}</div></details>`).join("")}</div>`
       : `<div class="empty"><img src="/assets/illustrations/ok.svg" alt=""><h3>Aucun problème reconnu</h3><p>Ce journal ne contient aucune des erreurs courantes que ModMaestro sait lire. Colle plutôt le crash-report complet, ou regarde l'onglet Audit.</p></div>`;
     return `
     <section>
@@ -370,10 +396,145 @@
     S.logs.text = $("#logtext").value; S.logs.path = $("#logpath").value.trim(); S.logs.error = "";
     if (!S.logs.text.trim() && !S.logs.path) { S.logs.error = "Colle un journal ou indique son chemin."; return render(); }
     try {
-      const r = await api("/api/logscan", S.logs.text.trim() ? { text: S.logs.text } : { path: S.logs.path });
-      S.logs.findings = r.findings;
+      const body = S.logs.text.trim() ? { text: S.logs.text } : { path: S.logs.path };
+      const r = await api("/api/logscan", { ...body, analysis: S.a && S.a.id });
+      S.logs.findings = r.findings; S.logs.suggestions = r.suggestions || [];
     } catch (e) { S.logs.error = e.message; S.logs.findings = null; }
     render();
+  }
+
+  /* ---- Vue : ma base ----------------------------------------------------------------------------------- */
+  function newLearn() { return { kind: "conflict", a: "", b: "", severity: "error", note: "", candidates: [], hint: "" }; }
+
+  async function loadKb() {
+    try { S.kb = await api("/api/kb"); S.kbErr = ""; } catch (e) { S.kbErr = e.message; }
+    if (S.view === "base") { const sc = $("#view").scrollTop; render(); $("#view").scrollTop = sc; }
+  }
+
+  function viewBase() {
+    const kb = S.kb, f = S.learnForm, isConflict = f.kind === "conflict";
+    const ids = S.a ? [...new Set(S.a.mods.map((m) => m.modid).filter(Boolean))].sort() : [];
+    const when = (ts) => (ts ? new Date(ts * 1000).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }) : "jamais");
+    const kindLabel = (r) => (r.kind === "conflict" ? "Conflit" : r.side === "client" ? "Client uniquement" : "À garder sur le serveur");
+    const stats = kb ? `
+      <div class="stats">
+        <div class="stat"><b>${kb.stats.community_sides}</b><span>mods connus (communauté)</span></div>
+        <div class="stat"><b>${kb.stats.community_conflicts}</b><span>conflits connus (communauté)</span></div>
+        <div class="stat"><b>${kb.learned.length}</b><span>entrées à toi</span></div>
+        <div class="stat"><b>${kb.cache.files}</b><span>mods reconnus en cache</span></div>
+      </div>${kb.stats.errors.length ? `<div class="warn-box"><b>Fichiers ignorés dans la base :</b><ul>${kb.stats.errors.slice(0, 5).map((e) => `<li>${esc(e)}</li>`).join("")}</ul></div>` : ""}`
+      : (S.kbErr ? `<div class="err-box">${esc(S.kbErr)}</div>` : '<div class="hint">Chargement…</div>');
+
+    const learned = kb && kb.learned.length ? `
+      <div class="group-title"><h3>Ta base</h3><span>stockée sur ton ordinateur</span></div>
+      <div class="rows">${kb.learned.map((r) => `
+        <div class="row"><div class="grow"><div class="nm">${esc(r.a)}${r.b ? ` ↔ ${esc(r.b)}` : ""}</div>
+          <div class="why">${kindLabel(r)}${r.kind === "conflict" ? ` · ${SEV[r.severity] || ""}` : ""}${r.note ? ` · ${esc(r.note)}` : ""}</div></div>
+          <span class="chip">${r.source === "import" ? "importé" : "à toi"}</span>
+          <button class="btn sm" data-ldel="${r.id}">Supprimer</button></div>`).join("")}</div>` : "";
+
+    return `
+    <section>
+      <div class="logs-head"><div><h2>Ma base de connaissances</h2>
+        <p>ModMaestro apprend de toi. Un conflit que tu as découvert, ou un mod qui n'a rien à faire sur un serveur : enregistre-le, et il sera repéré dans tous tes prochains audits.</p></div>
+        <img src="/assets/illustrations/conflict.svg" alt=""></div>
+      ${stats}
+
+      <div class="build-card" id="learn">
+        <h3 class="card-title">Apprendre quelque chose de nouveau</h3>
+        ${f.hint ? `<div class="hint" style="margin:0">${esc(f.hint)}</div>` : ""}
+        <label class="field">Que veux-tu enregistrer ?
+          <select class="input" id="lk">
+            <option value="conflict" ${f.kind === "conflict" ? "selected" : ""}>Deux mods qui ne vont pas ensemble</option>
+            <option value="client" ${f.kind === "client" ? "selected" : ""}>Un mod qui ne doit pas aller sur le serveur</option>
+            <option value="both" ${f.kind === "both" ? "selected" : ""}>Un mod à garder sur le serveur (fausse alerte)</option>
+          </select></label>
+        <div class="two">
+          <label class="field">${isConflict ? "Premier mod" : "Mod"}
+            <input class="input mono" id="la" list="ids" value="${esc(f.a)}" placeholder="identifiant, ex. sodium" spellcheck="false" autocomplete="off"></label>
+          ${isConflict ? `<label class="field">Second mod
+            <input class="input mono" id="lb" list="ids" value="${esc(f.b)}" placeholder="identifiant" spellcheck="false" autocomplete="off"></label>` : ""}
+        </div>
+        <datalist id="ids">${ids.map((i) => `<option value="${esc(i)}">`).join("")}</datalist>
+        ${f.candidates.length ? `<div><div class="hint" style="margin:0 0 8px">Mods du pack qui pourraient être en cause :</div><div class="chips">${f.candidates.slice(0, 40).map((c) => `<button class="chip" data-cand="${esc(c)}">${esc(c)}</button>`).join("")}</div></div>` : ""}
+        ${isConflict ? `<label class="field">Gravité
+          <select class="input" id="ls">${[["error", "Erreur — le jeu plante ou le mod ne marche pas"], ["warning", "Avertissement — problèmes probables"], ["info", "Info — simple redondance"]].map(([k, l]) => `<option value="${k}" ${f.severity === k ? "selected" : ""}>${l}</option>`).join("")}</select></label>` : ""}
+        <label class="field">Note (facultative)
+          <input class="input" id="ln" maxlength="500" value="${esc(f.note)}" placeholder="Ce qui s'est passé, pour t'en souvenir"></label>
+        ${S.learnErr ? `<div class="err-box" style="margin:0">${esc(S.learnErr)}</div>` : ""}
+        <div class="build-line"><button class="btn primary" id="lsave">Enregistrer</button>
+          ${S.learnOk && S.a ? '<button class="btn" id="reanalyze">Relancer l\'analyse pour l\'appliquer</button>' : ""}
+          ${S.learnOk && !S.a ? '<span class="hint" style="margin:0">Enregistré : il sera pris en compte à ta prochaine analyse.</span>' : ""}</div>
+      </div>
+      ${learned}
+
+      <div class="build-card">
+        <h3 class="card-title">Partager ou récupérer une base</h3>
+        <p class="muted">Exporte ta base dans un fichier, ou importe celle de quelqu'un d'autre. Rien n'est jamais envoyé automatiquement.
+          Pour la proposer à tout le monde, ajoute les fichiers au dépôt (voir <code>core/data/community/README.md</code>).</p>
+        <div class="build-line"><button class="btn" id="lexport">Exporter ma base</button>
+          <label class="btn" for="limport">Importer un fichier…</label><input type="file" id="limport" accept=".json,application/json" hidden></div>
+        ${S.importMsg ? `<div class="hint" style="margin:0">${esc(S.importMsg)}</div>` : ""}
+      </div>
+
+      ${kb ? `<div class="build-card">
+        <h3 class="card-title">Cache Modrinth</h3>
+        <p class="muted">${plural(kb.cache.files, "mod reconnu", "mods reconnus")}, ${plural(kb.cache.projects, "fiche", "fiches")}, ${size(kb.cache.size)}
+          · dernière vérification : ${when(kb.cache.last_check)}.<br><code>${esc(kb.cache.path)}</code></p>
+        ${kb.cache.degraded ? `<div class="warn-box" style="margin:0">${esc(kb.cache.degraded)}</div>` : ""}
+        <div class="build-line"><button class="btn" id="cclear">Vider le cache</button>
+          <span class="hint" style="margin:0">Ta base personnelle n'est pas touchée.</span></div>
+      </div>` : ""}
+    </section>`;
+  }
+
+  function readLearn() {
+    const g = (sel) => { const e = $(sel); return e ? e.value : null; };
+    const f = S.learnForm;
+    if (g("#la") !== null) f.a = g("#la").trim();
+    if (g("#lb") !== null) f.b = g("#lb").trim();
+    if (g("#ln") !== null) f.note = g("#ln");
+    if (g("#ls") !== null) f.severity = g("#ls");
+  }
+
+  async function saveLearn() {
+    readLearn();
+    const f = S.learnForm;
+    S.learnErr = ""; S.learnOk = false;
+    try {
+      await api("/api/learn", f.kind === "conflict"
+        ? { kind: "conflict", a: f.a, b: f.b, severity: f.severity, note: f.note }
+        : { kind: "side", a: f.a, side: f.kind, note: f.note });
+      S.learnForm = newLearn(); S.learnOk = true; toast("Enregistré dans ta base");
+      await loadKb();
+    } catch (e) { S.learnErr = e.message; render(); }
+  }
+
+  function download(text, name, type) {
+    const url = URL.createObjectURL(new Blob([text], { type: `${type};charset=utf-8` }));
+    const el = Object.assign(document.createElement("a"), { href: url, download: name });
+    document.body.appendChild(el); el.click(); el.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+
+  async function exportBase() {
+    try { const { bundle } = await api("/api/learn/export", {}); download(JSON.stringify(bundle, null, 2), "modmaestro-ma-base.json", "application/json"); toast("Base exportée"); }
+    catch (e) { toast(e.message); }
+  }
+
+  async function importBase(file) {
+    try {
+      const r = await api("/api/learn/import", { bundle: JSON.parse(await file.text()) });
+      S.importMsg = `${plural(r.added, "entrée importée", "entrées importées")}` + (r.errors.length ? ` · ${plural(r.errors.length, "ignorée", "ignorées")} : ${r.errors.slice(0, 2).join(" ")}` : "");
+      S.learnOk = r.added > 0;
+    } catch (e) { S.importMsg = e instanceof SyntaxError ? "Ce fichier n'est pas du JSON valide." : e.message; }
+    await loadKb();
+  }
+
+  async function clearCache() {
+    if (!confirm("Vider le cache Modrinth ? Il sera reconstruit à la prochaine analyse en ligne. Ta base personnelle est conservée.")) return;
+    try { await api("/api/cache/clear", {}); toast("Cache vidé"); } catch (e) { toast(e.message); }
+    await loadKb();
   }
 
   /* ---- Export ---------------------------------------------------------------------------------------------------- */
@@ -426,11 +587,37 @@
     $$("[data-copy]").forEach((b) => b.addEventListener("click", () => copy(b.dataset.copy)));
     on("#scanlog", "click", scanLog);
     $$("[data-log]").forEach((b) => b.addEventListener("click", () => { S.logs.path = b.dataset.log; S.logs.text = ""; $("#logpath").value = b.dataset.log; $("#logtext").value = ""; scanLog(); }));
+    on("#online", "change", (e) => { S.online = e.target.checked; try { localStorage.setItem("mm-online", S.online ? "1" : "0"); } catch { /* stockage indisponible */ } });
+    on("#lk", "change", (e) => { readLearn(); S.learnForm.kind = e.target.value; render(); });
+    on("#lsave", "click", saveLearn);
+    on("#reanalyze", "click", () => analyze(S.a.source));
+    on("#lexport", "click", exportBase);
+    on("#limport", "change", (e) => e.target.files[0] && importBase(e.target.files[0]));
+    on("#cclear", "click", clearCache);
+    $$("[data-ldel]").forEach((b) => b.addEventListener("click", async () => {
+      try { await api("/api/learn/delete", { id: Number(b.dataset.ldel) }); toast("Supprimé"); } catch (e) { toast(e.message); }
+      loadKb();
+    }));
+    $$("[data-cand]").forEach((b) => b.addEventListener("click", () => {
+      readLearn();
+      const f = S.learnForm;
+      if (f.kind === "conflict" && f.a && !f.b && f.a !== b.dataset.cand) f.b = b.dataset.cand; else f.a = b.dataset.cand;
+      render();
+    }));
+    $$("[data-sugg]").forEach((b) => b.addEventListener("click", () => {
+      const s = (S.logs.suggestions || []).find((x) => x.finding === Number(b.dataset.sugg));
+      if (!s) return;
+      S.learnForm = s.kind === "side"
+        ? { kind: "client", a: "", b: "", severity: "error", note: s.note, candidates: s.candidates || [], hint: s.hint || "" }
+        : { kind: "conflict", a: s.a, b: "", severity: "error", note: s.note, candidates: [], hint: s.hint || "" };
+      S.learnOk = false; S.learnErr = "";
+      go("base");
+    }));
     if (S.busy) updateProgress();
   }
 
   document.addEventListener("DOMContentLoaded", () => {
-    $("#version").textContent = `v${MM.version || ""} · 100 % local`;
+    $("#version").textContent = `v${MM.version || ""} · local par défaut`;
     $$(".nav-item").forEach((b) => b.addEventListener("click", () => !b.disabled && go(b.dataset.view)));
     $("#btn-new").addEventListener("click", () => { S.homeError = ""; go("home"); });
     $("#btn-export").addEventListener("click", exportReport);

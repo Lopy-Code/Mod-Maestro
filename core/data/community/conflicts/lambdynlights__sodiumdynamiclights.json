@@ -1,0 +1,11 @@
+{
+  "group": [
+    "lambdynlights",
+    "sodiumdynamiclights"
+  ],
+  "severity": "info",
+  "title": "Deux mods de lumière dynamique",
+  "message": "LambDynamicLights et Sodium Dynamic Lights ajoutent la même fonction (les objets tenus éclairent autour du joueur).",
+  "fix": "Garde-en un seul.",
+  "source": "ModMaestro (entrée de départ)"
+}

@@ -7,7 +7,7 @@ from datetime import datetime
 _SEV = {"error": "🔴 Erreur", "warning": "🟠 Avertissement", "info": "🔵 Info"}
 _CAT = {
     "files": "Fichiers", "duplicates": "Doublons", "dependencies": "Dépendances manquantes",
-    "versions": "Versions", "compat": "Compatibilité",
+    "versions": "Versions", "compat": "Compatibilité", "updates": "Mises à jour",
 }
 _SIDE = {"client": "Client", "server": "Serveur", "both": "Les deux", "unsure": "À vérifier"}
 
@@ -33,13 +33,21 @@ def to_markdown(d: dict) -> str:
         f"- **Santé** : {d['score']}/100 — {c['errors']} erreur(s), {c['warnings']} avertissement(s), {c['infos']} info(s)",
         "",
     ]
+    o = d.get("online") or {}
+    if o.get("enabled"):
+        lines.insert(-1, f"- **Modrinth** : {o.get('identified', 0)}/{o.get('total', 0)} mods reconnus par empreinte SHA-1"
+                         + (f" — ⚠ {o['error']}" if o.get("error") else ""))
+    else:
+        lines.insert(-1, "- **Modrinth** : non interrogé (analyse hors ligne)")
+    if (d.get("kb") or {}).get("learned"):
+        lines.insert(-1, f"- **Ma base** : {d['kb']['learned']} entrée(s) personnelle(s) appliquée(s)")
     if not d["issues"]:
         lines += ["## ✅ Aucun problème détecté", ""]
     else:
         cats: dict[str, list] = {}
         for i in d["issues"]:
             cats.setdefault(i["category"], []).append(i)
-        for cat in ("duplicates", "dependencies", "versions", "compat", "files"):
+        for cat in ("duplicates", "dependencies", "versions", "compat", "updates", "files"):
             items = cats.get(cat)
             if not items:
                 continue
@@ -50,6 +58,9 @@ def to_markdown(d: dict) -> str:
                 lines.append(i["message"])
                 if i.get("fix"):
                     lines += ["", f"**À faire :** {i['fix']}"]
+                if (i.get("data") or {}).get("updates"):
+                    lines += ["", "| Mod | Installée | Disponible |", "|---|---|---|"]
+                    lines += [f"| {u['name']} | {u['current']} | {u['latest']} |" for u in i["data"]["updates"]]
                 if i.get("files"):
                     lines += ["", "Fichiers : " + ", ".join(f"`{f}`" for f in i["files"])]
                 lines.append("")

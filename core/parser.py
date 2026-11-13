@@ -11,6 +11,7 @@ sont déjà fournis par d'autres.
 
 from __future__ import annotations
 
+import contextvars
 import io
 import json
 import os
@@ -20,6 +21,8 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Callable
+
+from .i18n import _
 
 try:  # Python ≥ 3.11
     import tomllib
@@ -75,6 +78,7 @@ class JarInfo:
     error: str | None = None
     mods: list[ModInfo] = field(default_factory=list)  # tous loaders confondus
     bundled: list[ModInfo] = field(default_factory=list)  # jar-in-jar
+    library: bool = False  # bibliothèque déclarée (FMLModType: LIBRARY) : sans métadonnées, mais volontaire
 
     @property
     def loaders(self) -> list[str]:
@@ -118,20 +122,20 @@ def resolve_source(path: str) -> tuple[str, list[str]]:
         if path.lower().endswith((".zip", ".mrpack")):
             return _extract_zip(path)
         if path.lower().endswith(".jar"):
-            return os.path.dirname(path), ["Un seul fichier .jar a été donné : analyse du dossier qui le contient."]
-        raise ValueError("Choisis un dossier de mods ou une archive .zip.")
+            return os.path.dirname(path), [_("Un seul fichier .jar a été donné : analyse du dossier qui le contient.")]
+        raise ValueError(_("Choisis un dossier de mods ou une archive .zip."))
 
     if count_jars(path):
         return path, notes
     for rel in ("mods", "minecraft/mods", ".minecraft/mods", "overrides/mods"):
         cand = os.path.join(path, rel)
         if os.path.isdir(cand) and count_jars(cand):
-            notes.append(f"Dossier de mods détecté automatiquement : {rel}/")
+            notes.append(_("Dossier de mods détecté automatiquement : {rel}/", rel=rel))
             return cand, notes
-    raise ValueError(
+    raise ValueError(_(
         "Aucun fichier .jar trouvé ici. Choisis le dossier `mods` de ton modpack "
         "(ou la racine de l'instance qui le contient)."
-    )
+    ))
 
 
 def _extract_zip(path: str) -> tuple[str, list[str]]:
@@ -139,7 +143,7 @@ def _extract_zip(path: str) -> tuple[str, list[str]]:
     try:
         zf = zipfile.ZipFile(path)
     except zipfile.BadZipFile as exc:
-        raise ValueError("Cette archive est corrompue ou n'est pas un zip valide.") from exc
+        raise ValueError(_("Cette archive est corrompue ou n'est pas un zip valide.")) from exc
     with zf:
         members = [
             n for n in zf.namelist()
@@ -148,17 +152,17 @@ def _extract_zip(path: str) -> tuple[str, list[str]]:
         if not members:
             names = set(zf.namelist())
             if "manifest.json" in names or "modrinth.index.json" in names:
-                raise ValueError(
+                raise ValueError(_(
                     "Ce zip ne contient que la liste des mods (manifest), pas les .jar eux-mêmes. "
                     "Installe le modpack avec ton launcher, puis choisis le dossier `mods` de l'instance."
-                )
-            raise ValueError("Aucun dossier `mods/` contenant des .jar dans cette archive.")
+                ))
+            raise ValueError(_("Aucun dossier `mods/` contenant des .jar dans cette archive."))
         out = tempfile.mkdtemp(prefix="modmaestro_zip_")
         for name in members:
             target = os.path.join(out, os.path.basename(name))
             with zf.open(name) as src, open(target, "wb") as dst:
                 dst.write(src.read())
-        notes.append(f"{len(members)} jar extraits de l'archive vers un dossier temporaire.")
+        notes.append(_("{n} jar extraits de l'archive vers un dossier temporaire.", n=len(members)))
     return out, notes
 
 
@@ -193,16 +197,27 @@ def read_jar(path: str) -> JarInfo:
         with zipfile.ZipFile(path) as zf:
             mods, bundled = _read_archive(zf, info.file, 0)
     except zipfile.BadZipFile:
-        info.status, info.error = "corrupt", "Archive zip invalide (téléchargement interrompu ou fichier abîmé)."
+        info.status, info.error = "corrupt", _("Archive zip invalide (téléchargement interrompu ou fichier abîmé).")
         return info
     except Exception as exc:  # noqa: BLE001 — on ne veut jamais planter l'audit complet
-        info.status, info.error = "unreadable", f"Lecture impossible : {exc}"
+        info.status, info.error = "unreadable", _("Lecture impossible : {exc}", exc=exc)
         return info
     info.mods, info.bundled = mods, bundled
     if not mods:
+        info.library = _is_declared_library(path)
         info.status = "no-metadata"
-        info.error = "Aucune métadonnée de mod (bibliothèque, coremod ou format trop ancien)."
+        info.error = _("Aucune métadonnée de mod (bibliothèque, coremod ou format trop ancien).")
     return info
+
+
+def _is_declared_library(path: str) -> bool:
+    """Bibliothèque volontaire : le manifeste porte `FMLModType: LIBRARY` / `GAMELIBRARY`."""
+    try:
+        with zipfile.ZipFile(path) as zf:
+            text = zf.read("META-INF/MANIFEST.MF").decode("utf-8", "replace")
+    except (KeyError, OSError, zipfile.BadZipFile):
+        return False
+    return bool(re.search(r"^FMLModType:\s*(GAME)?LIBRARY\s*$", text, re.MULTILINE | re.IGNORECASE))
 
 
 def _manifest_version(zf: zipfile.ZipFile) -> str | None:
@@ -310,9 +325,9 @@ def _parse_forge_toml(text: str, loader: str, manifest_v: str | None) -> list[Mo
             deps.append(Dep(dep_id, kind, d.get("versionRange"), "maven", side, d.get("reason")))
             if dep_id in ("neoforge", "forge", "minecraft") and kind == "required":
                 if side == "CLIENT":
-                    env, env_reason = "client", "Déclaré côté client uniquement dans ses métadonnées"
+                    env, env_reason = "client", _("Déclaré côté client uniquement dans ses métadonnées")
                 elif side == "SERVER" and env == "both":
-                    env, env_reason = "server", "Déclaré côté serveur uniquement dans ses métadonnées"
+                    env, env_reason = "server", _("Déclaré côté serveur uniquement dans ses métadonnées")
         mods.append(ModInfo(
             modid=modid,
             name=str(entry.get("displayName") or modid),
@@ -366,12 +381,12 @@ def _parse_fabric(text: str) -> list[ModInfo]:
         provides.append(str(p.get("id") if isinstance(p, dict) else p))
     env_raw = str(data.get("environment", "*")).lower()
     env = {"client": "client", "server": "server"}.get(env_raw, "both")
-    env_reason = f"environment = « {env_raw} » dans fabric.mod.json" if env != "both" else None
+    env_reason = _("environment = « {env} » dans fabric.mod.json", env=env_raw) if env != "both" else None
 
     eps = data.get("entrypoints")
     ep_keys = sorted(eps.keys()) if isinstance(eps, dict) else []
     if env == "both" and ep_keys and "client" in ep_keys and not {"main", "server"} & set(ep_keys):
-        env, env_reason = "client", "Seul un point d'entrée « client » est déclaré"
+        env, env_reason = "client", _("Seul un point d'entrée « client » est déclaré")
 
     return [ModInfo(
         modid=modid,
@@ -426,7 +441,7 @@ def _parse_quilt(text: str) -> list[ModInfo]:
         deps=_quilt_deps(q.get("depends"), "required") + _quilt_deps(q.get("breaks"), "incompatible"),
         provides=provides,
         env=env,
-        env_reason=f"minecraft.environment = « {env_raw} » dans quilt.mod.json" if env != "both" else None,
+        env_reason=_("minecraft.environment = « {env} » dans quilt.mod.json", env=env_raw) if env != "both" else None,
         description=str(meta.get("description") or "").strip()[:300],
     )]
 
@@ -447,7 +462,8 @@ def scan_folder(
     if progress:
         progress(0, total)
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(read_jar, p): i for i, p in enumerate(paths)}
+        # chaque tâche hérite de la langue courante (contextvars) : les messages d'erreur sortent dans la bonne langue
+        futures = {pool.submit(contextvars.copy_context().run, read_jar, p): i for i, p in enumerate(paths)}
         for fut, i in futures.items():
             results[i] = fut.result()
             done += 1

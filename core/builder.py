@@ -7,6 +7,7 @@ import shutil
 import zipfile
 
 from .analyzer import Analysis, compute_plan
+from .i18n import _
 
 
 def suggest_output_dir(mods_dir: str, name: str = "server_mods") -> str:
@@ -16,6 +17,17 @@ def suggest_output_dir(mods_dir: str, name: str = "server_mods") -> str:
     n = 2
     while os.path.exists(candidate) or os.path.exists(candidate + ".zip"):
         candidate = os.path.join(parent, f"{name}_{n}")
+        n += 1
+    return candidate
+
+
+def suggest_file(mods_dir: str, name: str, ext: str) -> str:
+    """Un nom de fichier libre à côté du dossier mods (ex. « mon_pack.mrpack », « mon_pack_2.mrpack »)."""
+    parent = os.path.dirname(os.path.abspath(mods_dir))
+    base = "".join(c for c in name if c not in '\\/:*?"<>|').strip() or "modpack"
+    candidate, n = os.path.join(parent, base + ext), 2
+    while os.path.exists(candidate):
+        candidate = os.path.join(parent, f"{base}_{n}{ext}")
         n += 1
     return candidate
 
@@ -45,14 +57,14 @@ def build_server(
 
     output = os.path.abspath(os.path.expanduser(output.strip().strip('"')))
     if _inside(output, a.mods_dir) or _inside(a.mods_dir, output):
-        raise ValueError("Le dossier de sortie ne doit pas être le dossier de mods (ni dedans, ni le contenir).")
+        raise ValueError(_("Le dossier de sortie ne doit pas être le dossier de mods (ni dedans, ni le contenir)."))
     if os.path.exists(output) and (not os.path.isdir(output) or os.listdir(output)):
         raise FileExistsError(
-            f"« {output} » existe déjà et n'est pas vide. Choisis un autre nom : je ne mélange jamais mes fichiers avec les tiens."
+            _("« {path} » existe déjà et n'est pas vide. Choisis un autre nom : je ne mélange jamais mes fichiers avec les tiens.", path=output)
         )
     zip_path = output.rstrip(os.sep) + ".zip"
     if make_zip and os.path.exists(zip_path):
-        raise FileExistsError(f"« {zip_path} » existe déjà.")
+        raise FileExistsError(_("« {path} » existe déjà.", path=zip_path))
 
     os.makedirs(output, exist_ok=True)
     for f in plan["keep"]:

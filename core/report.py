@@ -4,45 +4,57 @@ from __future__ import annotations
 
 from datetime import datetime
 
-_SEV = {"error": "🔴 Erreur", "warning": "🟠 Avertissement", "info": "🔵 Info"}
-_CAT = {
-    "files": "Fichiers", "duplicates": "Doublons", "dependencies": "Dépendances manquantes",
-    "versions": "Versions", "compat": "Compatibilité", "updates": "Mises à jour",
-}
-_SIDE = {"client": "Client", "server": "Serveur", "both": "Les deux", "unsure": "À vérifier"}
+from .i18n import _, get_lang
+
+
+def _sev(k: str) -> str:
+    return {"error": "🔴 " + _("Erreur"), "warning": "🟠 " + _("Avertissement"), "info": "🔵 " + _("Info")}[k]
+
+
+def _cat(k: str) -> str:
+    return {"files": _("Fichiers"), "duplicates": _("Doublons"), "dependencies": _("Dépendances manquantes"),
+            "versions": _("Versions"), "compat": _("Compatibilité"), "updates": _("Mises à jour")}.get(k, k)
+
+
+def _side(k: str) -> str:
+    return {"client": _("Client"), "server": _("Serveur"), "both": _("Les deux"), "unsure": _("À vérifier")}.get(k, k)
 
 
 def human_size(n: float) -> str:
-    for unit in ("o", "Ko", "Mo", "Go"):
-        if n < 1024 or unit == "Go":
-            return f"{n:.0f} {unit}" if unit == "o" else f"{n:.1f} {unit}"
+    units = ("B", "KB", "MB", "GB") if get_lang() == "en" else ("o", "Ko", "Mo", "Go")
+    for unit in units:
+        if n < 1024 or unit == units[-1]:
+            return f"{n:.0f} {unit}" if unit == units[0] else f"{n:.1f} {unit}"
         n /= 1024
-    return f"{n} o"
+    return f"{n} {units[0]}"
 
 
 def to_markdown(d: dict) -> str:
     c = d["counts"]
     lines = [
-        "# Rapport ModMaestro",
+        _("# Rapport ModMaestro"),
         "",
-        f"*Généré le {datetime.now():%d/%m/%Y à %H:%M}*",
+        _("*Généré le {date} à {time}*", date=f"{datetime.now():%d/%m/%Y}", time=f"{datetime.now():%H:%M}"),
         "",
-        f"- **Dossier** : `{d['mods_dir']}`",
-        f"- **Loader** : {d['loader_label']}" + (f" · **Minecraft** {d['mc_version']}" if d.get("mc_version") else ""),
-        f"- **Contenu** : {c['jars']} fichiers, {c['mods']} mods, {c['bundled']} intégrés (jar-in-jar), {human_size(c['size'])}",
-        f"- **Santé** : {d['score']}/100 — {c['errors']} erreur(s), {c['warnings']} avertissement(s), {c['infos']} info(s)",
+        _("- **Dossier** : `{path}`", path=d["mods_dir"]),
+        _("- **Loader** : {loader}", loader=d["loader_label"])
+        + (_(" · **Minecraft** {version}", version=d["mc_version"]) if d.get("mc_version") else ""),
+        _("- **Contenu** : {jars} fichiers, {mods} mods, {bundled} intégrés (jar-in-jar), {size}",
+          jars=c["jars"], mods=c["mods"], bundled=c["bundled"], size=human_size(c["size"])),
+        _("- **Santé** : {score}/100 — {errors} erreur(s), {warnings} avertissement(s), {infos} info(s)",
+          score=d["score"], errors=c["errors"], warnings=c["warnings"], infos=c["infos"]),
         "",
     ]
     o = d.get("online") or {}
     if o.get("enabled"):
-        lines.insert(-1, f"- **Modrinth** : {o.get('identified', 0)}/{o.get('total', 0)} mods reconnus par empreinte SHA-1"
-                         + (f" — ⚠ {o['error']}" if o.get("error") else ""))
+        lines.insert(-1, _("- **Modrinth** : {a}/{b} mods reconnus par empreinte SHA-1", a=o.get("identified", 0), b=o.get("total", 0))
+                     + (f" — ⚠ {o['error']}" if o.get("error") else ""))
     else:
-        lines.insert(-1, "- **Modrinth** : non interrogé (analyse hors ligne)")
+        lines.insert(-1, _("- **Modrinth** : non interrogé (analyse hors ligne)"))
     if (d.get("kb") or {}).get("learned"):
-        lines.insert(-1, f"- **Ma base** : {d['kb']['learned']} entrée(s) personnelle(s) appliquée(s)")
+        lines.insert(-1, _("- **Ma base** : {n} entrée(s) personnelle(s) appliquée(s)", n=d["kb"]["learned"]))
     if not d["issues"]:
-        lines += ["## ✅ Aucun problème détecté", ""]
+        lines += [_("## ✅ Aucun problème détecté"), ""]
     else:
         cats: dict[str, list] = {}
         for i in d["issues"]:
@@ -51,39 +63,40 @@ def to_markdown(d: dict) -> str:
             items = cats.get(cat)
             if not items:
                 continue
-            lines += [f"## {_CAT.get(cat, cat)} ({len(items)})", ""]
+            lines += [f"## {_cat(cat)} ({len(items)})", ""]
             for i in items:
-                lines.append(f"### {_SEV[i['severity']]} — {i['title']}")
+                lines.append(f"### {_sev(i['severity'])} — {i['title']}")
                 lines.append("")
                 lines.append(i["message"])
                 if i.get("fix"):
-                    lines += ["", f"**À faire :** {i['fix']}"]
+                    lines += ["", _("**À faire :** {fix}", fix=i["fix"])]
                 if (i.get("data") or {}).get("updates"):
-                    lines += ["", "| Mod | Installée | Disponible |", "|---|---|---|"]
+                    lines += ["", _("| Mod | Installée | Disponible |"), "|---|---|---|"]
                     lines += [f"| {u['name']} | {u['current']} | {u['latest']} |" for u in i["data"]["updates"]]
                 if i.get("files"):
-                    lines += ["", "Fichiers : " + ", ".join(f"`{f}`" for f in i["files"])]
+                    lines += ["", _("Fichiers : {files}", files=", ".join(f"`{f}`" for f in i["files"]))]
                 lines.append("")
 
     p = d["plan"]
     lines += [
-        "## Dossier serveur (proposition)",
+        _("## Dossier serveur (proposition)"),
         "",
-        f"- {c['server_keep']} mods conservés, {c['server_remove']} retirés, {c['server_unsure']} à vérifier",
+        _("- {keep} mods conservés, {remove} retirés, {unsure} à vérifier",
+          keep=c["server_keep"], remove=c["server_remove"], unsure=c["server_unsure"]),
         "",
     ]
     if p["remove"]:
-        lines += ["| Retiré | Raison |", "|---|---|"]
+        lines += [_("| Retiré | Raison |"), "|---|---|"]
         lines += [f"| `{r['file']}` | {r['reason']} |" for r in p["remove"]]
         lines.append("")
     if p["unsure"]:
-        lines += ["À vérifier (gardés par défaut) :", ""]
+        lines += [_("À vérifier (gardés par défaut) :"), ""]
         lines += [f"- `{u['file']}` — {u['reason']}" for u in p["unsure"]]
         lines.append("")
 
-    lines += ["## Liste des mods", "", "| Mod | Version | Loader | Côté | Fichier |", "|---|---|---|---|---|"]
+    lines += [_("## Liste des mods"), "", _("| Mod | Version | Loader | Côté | Fichier |"), "|---|---|---|---|---|"]
     for m in d["mods"]:
         lines.append(f"| {m['name']} | {m['version'] or '?'} | {m['loader'] or '—'} | "
-                     f"{_SIDE.get(m['side'], m['side'])} | `{m['file']}` |")
+                     f"{_side(m['side'])} | `{m['file']}` |")
     lines.append("")
     return "\n".join(lines)

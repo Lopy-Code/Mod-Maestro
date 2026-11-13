@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections import defaultdict
 
 from .analyzer import Analysis, norm
+from .i18n import _, ng
 from .modrinth import OnlineData, project_url
 
 
@@ -25,10 +26,12 @@ def apply_online(a: Analysis, online: OnlineData) -> None:
     for fname, info in online.files.items():
         by_project[info["project_id"]].append(fname)
         if fname in a.entries:
+            dl = next((f for f in info.get("files", []) if f.get("sha1") == info["sha1"]), None)
             a.entries[fname]["online"] = {
                 "title": info["title"], "slug": info["slug"], "url": info["url"],
                 "version": info["version_number"], "client_side": info["client_side"],
                 "server_side": info["server_side"],
+                "download": {"url": dl["url"], "size": dl.get("size")} if dl and dl.get("url") else None,
             }
 
     # --- incompatibilités déclarées sur Modrinth ------------------------------------------------
@@ -49,8 +52,8 @@ def apply_online(a: Analysis, online: OnlineData) -> None:
             a.add_issue(
                 f"mr-incompat:{pair[0]}:{pair[1]}", "error", "compat",
                 f"{info['title'] or fname} ↔ {_name(online, target)}",
-                f"D'après Modrinth, {info['title'] or fname} est déclaré incompatible avec {_name(online, target)}.",
-                files=files, fix="Retire l'un des deux mods, ou cherche une version qui les rend compatibles.",
+                _("D'après Modrinth, {a} est déclaré incompatible avec {b}.", a=info["title"] or fname, b=_name(online, target)),
+                files=files, fix=_("Retire l'un des deux mods, ou cherche une version qui les rend compatibles."),
                 data={"source": "modrinth"})
 
     # --- dépendances requises, absentes du pack -----------------------------------------------------
@@ -75,11 +78,13 @@ def apply_online(a: Analysis, online: OnlineData) -> None:
     for pid, m in sorted(missing.items(), key=lambda kv: kv[1]["title"].lower()):
         names = sorted(m["by"])
         a.add_issue(
-            f"mr-missing:{pid}", "warning", "dependencies", f"Dépendance probablement manquante : {m['title']}",
-            f"D'après Modrinth, {', '.join(names[:6])}{' et d’autres' if len(names) > 6 else ''} "
-            f"a{'ont' if len(names) > 1 else ''} besoin de {m['title']}, absent du pack. "
-            "À vérifier : le mod peut déjà l'embarquer.",
-            files=sorted(m["files"]), fix=f"Télécharge « {m['title']} » sur Modrinth si le jeu refuse de démarrer.",
+            f"mr-missing:{pid}", "warning", "dependencies", _("Dépendance probablement manquante : {name}", name=m["title"]),
+            ng("D'après Modrinth, {names}{more} a besoin de {name}, absent du pack. "
+               "À vérifier : le mod peut déjà l'embarquer.",
+               "D'après Modrinth, {names}{more} ont besoin de {name}, absent du pack. "
+               "À vérifier : le mod peut déjà l'embarquer.",
+               len(names), names=", ".join(names[:6]), more=_(" et d’autres") if len(names) > 6 else "", name=m["title"]),
+            files=sorted(m["files"]), fix=_("Télécharge « {name} » sur Modrinth si le jeu refuse de démarrer.", name=m["title"]),
             links=[{"label": "Modrinth", "url": project_url(m["slug"])}],
             data={"source": "modrinth", "missing_project": pid})
 
@@ -94,8 +99,8 @@ def apply_updates(a: Analysis, updates: list[dict], error: str | None = None) ->
     shown = ", ".join(f"{u['name']} ({u['current']} → {u['latest']})" for u in updates[:5])
     a.add_issue(
         "updates", "info", "updates",
-        f"{len(updates)} mise{'s' if len(updates) > 1 else ''} à jour disponible{'s' if len(updates) > 1 else ''}",
-        f"Versions plus récentes trouvées sur Modrinth pour votre loader et votre version de Minecraft : {shown}"
-        + (" …" if len(updates) > 5 else "") + ". Mettre à jour n'est jamais obligatoire : fais-le surtout "
-        "si tu as un problème avec l'un de ces mods.",
+        ng("{n} mise à jour disponible", "{n} mises à jour disponibles", len(updates)),
+        _("Versions plus récentes trouvées sur Modrinth pour votre loader et votre version de Minecraft : {shown}{dots}. "
+          "Mettre à jour n'est jamais obligatoire : fais-le surtout si tu as un problème avec l'un de ces mods.",
+          shown=shown, dots=" …" if len(updates) > 5 else ""),
         files=[u["file"] for u in updates], data={"source": "modrinth", "updates": updates})

@@ -2,8 +2,8 @@
 
 # ModMaestro
 
-Audit your Minecraft modpack, spot duplicates and missing dependencies, and build a clean server `mods` folder — with a local web interface, a terminal menu, or a one-line command.
-*Audite ton modpack Minecraft, repère doublons et dépendances manquantes, et génère un dossier `mods` serveur propre — avec une interface web locale, un menu terminal ou une simple commande.*
+Audit your Minecraft modpack, find the mod that crashes it, compare two packs, and build an optimised server — with a local web interface (French / English), a terminal menu, or one-line commands.
+*Audite ton modpack Minecraft, trouve le mod qui le fait planter, compare deux packs et prépare un serveur optimisé — interface web locale (français / anglais), menu terminal ou simples commandes.*
 
 [🇫🇷 Français](#-français) · [🇬🇧 English](#-english)
 
@@ -15,111 +15,108 @@ Audit your Minecraft modpack, spot duplicates and missing dependencies, and buil
 
 ### À propos
 
-ModMaestro est un outil Python **local par défaut** qui lit chaque `.jar` d'un dossier `mods` et explique, en clair, ce qui cloche et comment le réparer. Il prépare aussi le dossier `mods` d'un serveur dédié en retirant ce qui ne sert qu'au joueur.
+ModMaestro lit chaque `.jar` d'un dossier `mods`, explique en clair ce qui cloche et comment le réparer, puis prépare ce qu'il faut pour un serveur dédié. Il est **local par défaut** : rien ne quitte ton ordinateur sans que tu l'actives.
 
-Compatible **NeoForge, Forge, Fabric et Quilt**, y compris les mods embarqués (jar-in-jar), pour ne pas signaler « manquante » une bibliothèque déjà fournie par un autre mod.
-
-### Stack technique
-
-* **Python 3.11+** — logique principale. Le moteur et l'interface web n'ont **aucune dépendance externe**.
-* **`zipfile` / `tomllib` / `json`** — lecture directe des archives `.jar` en mémoire, sans extraction sur le disque, et des fichiers `neoforge.mods.toml`, `mods.toml`, `fabric.mod.json` et `quilt.mod.json`.
-* **`http.server`** — petit serveur local pour l'interface web.
-* **HTML / CSS / JavaScript** — interface sans framework ni téléchargement de police, thème clair et sombre.
-* **Rich** *(facultatif)* — couleurs, tableaux et barre de progression pour le menu terminal. Sans lui, le menu fonctionne en texte simple.
+Compatible **NeoForge, Forge, Fabric et Quilt**, y compris les mods embarqués (jar-in-jar) et les passerelles comme Sinytra Connector.
 
 ### Fonctionnalités
 
-* **Extraction de métadonnées** : `modid`, nom, version, loader et dépendances de chaque mod, y compris les mods embarqués.
-* **Détection de doublons** : plusieurs versions du même mod, avec la version à garder (la plus récente).
-* **Dépendances** : mods requis manquants, et versions installées qui ne respectent pas la plage demandée (plages Maven `[1.0,2.0)` et Fabric `>=1.0 <2`, `~`, `^`, `1.21.x`).
-* **Incompatibilités** : conflits déclarés par les auteurs, et pièges connus (Sodium + OptiFine, deux moteurs de shaders…).
-* **Compatibilité loader et Minecraft** : mod Fabric dans un pack NeoForge, mod Forge dans un pack NeoForge, fichier corrompu ou sans métadonnées, mod visant une autre version de Minecraft.
-* **Séparation client / serveur** : mods strictement clients (rendu, mini-cartes, interface), retirés automatiquement. Un mod client dont dépend un mod serveur est **conservé**.
-* **Export serveur** : copie des mods retenus vers un dossier **neuf** (jamais dans ton dossier d'origine), avec une archive `.zip` en option. Chaque choix est modifiable.
-* **Diagnostic de journal de crash** : `latest.log` ou crash-report → dépendance manquante, doublon, mod client sur serveur, mauvaise version de Java, mémoire insuffisante, mixin en échec…
-* **Rapport** : export Markdown de l'audit complet.
-* **Modrinth** *(facultatif, désactivé par défaut)* : reconnaît tes mods par empreinte, fiabilise le tri client / serveur, ajoute les incompatibilités et dépendances déclarées sur Modrinth, et signale les mises à jour disponibles.
-* **Cache SQLite** : les réponses de Modrinth sont gardées sur ton ordinateur (7 jours pour un mod reconnu, 1 jour pour un mod inconnu, 12 h pour les mises à jour). Une 2ᵉ analyse du même pack ne fait aucune requête.
-* **Base de connaissances communautaire** : un fichier JSON par mod ou par conflit dans `core/data/community/`, simple à proposer en pull request, avec une validation automatique.
-* **Apprentissage** : un conflit ou un mod « client » découvert, ou repéré dans un journal de crash, s'enregistre dans **ta base personnelle** (onglet « Ma base » ou touche `m` du menu), s'applique à toutes tes analyses suivantes et s'exporte / s'importe pour être partagé.
-* **Passerelles de loader** : avec Sinytra Connector, les mods Fabric d'un pack NeoForge sont signalés en simple information, pas en erreur.
+**Analyse**
+* **Doublons, dépendances, versions** : plusieurs versions d'un même mod, mods requis manquants, plages de versions non respectées (Maven, Fabric, `~`, `^`, `1.21.x`).
+* **Incompatibilités** : conflits déclarés par les auteurs et pièges connus (Sodium + OptiFine, deux moteurs de shaders…).
+* **Compatibilité loader / Minecraft**, fichiers corrompus ou sans métadonnées, tri **client / serveur**.
+* **Score de santé fiable** : chaque alerte est *certaine* ou *probable* ; seules les certaines pèsent lourd, et le score ne s'effondre plus à cause d'une cascade d'estimations. Si `logs/latest.log` prouve que le jeu a démarré, le pack n'est **jamais** déclaré cassé. Une fausse alerte se met de côté en un clic (« Ignorer »), ou toutes d'un coup (« Ce modpack fonctionne : tout ignorer ») ; elles restent consultables et réversibles.
+* **Modrinth** *(facultatif, désactivé par défaut)* : reconnaît les mods par empreinte, fiabilise le tri client / serveur, ajoute incompatibilités et mises à jour. Cache SQLite local.
+
+**Outils**
+* **Comparer 2 modpacks** : mods ajoutés, retirés, mis à jour ou rétrogradés, et problèmes apparus ou résolus, avec l'évolution du score.
+* **Chercher la cause d'un crash** : lecture de `latest.log` / crash-report (dépendance manquante, mixin, Java, mémoire…), puis, si le journal ne dit rien, **recherche par essais** : ModMaestro prépare des dossiers de test (avec les dépendances nécessaires), tu lances le jeu et réponds « ça plante » / « ça marche ». Le suspect est confirmé par un contre-essai.
+* **Exporter** : `.mrpack` (Modrinth, Prism, ATLauncher…), archive `.zip`, **rapport HTML** à envoyer à des amis (liste propre des mods et des problèmes, aucun chemin de ton ordinateur par défaut) ou rapport Markdown.
+* **Dossier serveur** : copie des mods utiles vers un dossier **neuf** ; ton dossier d'origine n'est jamais modifié. Chaque choix est modifiable.
+* **Fichiers de lancement optimisés** : `start.bat` / `start.sh`, `user_jvm_args.txt`, `server.properties`. Java choisi d'après la version de Minecraft, flags d'Aikar, mémoire estimée, redémarrage automatique, adaptés à NeoForge, Forge, Fabric ou Quilt. `eula.txt` reste à `false` tant que tu n'as pas coché l'acceptation toi-même.
+* **Mods conseillés** : compagnons connus pour que les autres mods marchent mieux (performances, correctifs de crash, bibliothèques), avec disponibilité pour ta version si Modrinth est activé.
+* **Ma base** : un conflit ou un mod client découvert s'enregistre dans ta base personnelle, s'applique à toutes tes analyses et s'exporte / s'importe. Le bouton **Proposer à la communauté** prépare un message prêt à publier sur le dépôt du projet.
+
+**Interface**
+* **Français / anglais** (sélecteur en bas du menu ; les alertes, rapports et le terminal suivent la langue) et animations douces, désactivables (réglage « Animations » ; `prefers-reduced-motion` est respecté).
+* Thème clair / sombre, adaptée aux petits écrans.
 
 ### Installation et lancement
 
-Il faut **Python 3.11 ou plus récent** ([python.org](https://www.python.org/downloads/)).
+**Sans Python** : télécharge l'application pour ton système dans les [Releases](../../releases) (`ModMaestro-Windows-x64.zip`, `ModMaestro-Linux-x64.tar.gz`, `ModMaestro-macOS-arm64.zip` ou `-x64.zip`), décompresse et lance `ModMaestro`. Elle ouvre l'interface dans ton navigateur. *(Non signée : Windows SmartScreen et macOS Gatekeeper demandent une confirmation au premier lancement.)*
 
-| Système | Interface web |
+**Avec Python 3.11+** ([python.org](https://www.python.org/downloads/)) :
+
+| Système | Lancement |
 |---|---|
 | Windows | double-clic sur `lancer.bat` |
 | Linux / macOS | `./lancer.sh` |
 | Partout | `python main.py` |
 
 ```bash
-python main.py "/chemin/vers/mods"          # interface web, analyse lancée tout de suite
-python main.py --demo                       # essayer avec un modpack fictif
-python main.py --cli                        # menu interactif dans le terminal
-python main.py --audit "/chemin/vers/mods"  # audit rapide ; code retour 1 s'il y a des erreurs
-python main.py --audit "/chemin/vers/mods" --online   # idem, en interrogeant Modrinth
-python main.py --kb                         # affiche ta base personnelle
-python main.py --export-kb ma-base.json     # exporte ta base (--import-kb pour en importer une)
-pip install -r requirements.txt             # facultatif : installe Rich pour le menu terminal
+python main.py "/chemin/vers/mods"                     # interface web, analyse lancée
+python main.py --lang en --demo                        # essayer avec un modpack fictif, en anglais
+python main.py --cli                                   # menu interactif dans le terminal
+python main.py --audit "/mods" [--online]              # audit rapide ; code retour 1 s'il y a des erreurs
+python main.py --compare "/pack_avant" "/pack_apres"   # compare deux modpacks
+python main.py --html rapport.html "/mods"             # rapport HTML à partager
+python main.py --export-mrpack pack.mrpack "/mods" --loader-version 21.1.172
+python main.py --server-kit "/nouveau/dossier" "/mods" --ram 8 [--accept-eula]
+python main.py --find-crash "/mods"                    # recherche du mod fautif par essais
+python main.py --recommend "/mods"                     # mods conseillés
+python main.py --kb | --export-kb f.json | --import-kb f.json   # ta base personnelle
 ```
 
-Le dossier peut être le dossier `mods`, la racine d'une instance (le dossier `mods/` est trouvé tout seul, y compris `minecraft/mods` et `.minecraft/mods` pour Prism ou MultiMC), ou une archive `.zip` qui contient un dossier `mods/`.
+Le dossier peut être le dossier `mods`, la racine d'une instance (le dossier `mods/` est trouvé tout seul, y compris pour Prism ou MultiMC) ou un `.zip` qui contient un dossier `mods/`.
+
+**Compiler soi-même** : `pip install pyinstaller rich`, puis `python tools/build_binaries.py` → `dist/ModMaestro`. PyInstaller ne compile que pour le système sur lequel il tourne ; le workflow GitHub Actions (`.github/workflows/build.yml`) produit Windows, Linux et macOS : il lance les tests, vérifie que chaque exécutable démarre, puis publie les fichiers dans une Release quand tu pousses un tag `vX.Y.Z`.
 
 ### Limites
 
-* Le tri client / serveur est une **estimation** : il s'appuie sur ce que le mod déclare, puis sur une liste de mods connus modifiable (`core/data/knowledge.json`). En cas de doute, le mod est marqué « à vérifier » et gardé.
-* Les conflits de code que personne ne déclare ne se détectent qu'en lançant le jeu : c'est le rôle du diagnostic de journal.
-* Modrinth ne connaît que les mods qui y sont publiés (pas CurseForge, ni les mods privés) : un mod inconnu est simplement analysé avec ses métadonnées locales. Une dépendance « manquante » d'après Modrinth n'est qu'un **avertissement** : le mod peut déjà l'embarquer.
-* La base communautaire fournie est un **point de départ** (quelques entrées) : elle ne grandit que si tu y contribues.
+* Le tri client / serveur est une **estimation** ; en cas de doute le mod est marqué « à vérifier » et gardé.
+* Les conflits que personne ne déclare ne se voient qu'au lancement : d'où le journal de crash et la recherche par essais (elle suppose que le crash est reproductible et demande de relancer le jeu à chaque essai).
+* Modrinth ne connaît que les mods qui y sont publiés (pas CurseForge). Un `.mrpack` référence les mods reconnus et embarque les autres.
+* Le lanceur serveur suppose que tu as installé le serveur (Forge / NeoForge / Fabric / Quilt) dans le dossier ; ModMaestro génère les scripts, pas l'installation du loader.
+* Les exécutables Windows et macOS sont compilés par GitHub Actions ; seul le build Linux a été essayé à la main.
+* La base communautaire fournie est un **point de départ** : elle ne grandit que si tu y contribues.
 
 ### Confidentialité et sécurité
 
-**Par défaut, rien ne quitte ton ordinateur.** Si tu actives Modrinth (interrupteur de l'accueil, `--online` ou touche `o` du menu), ModMaestro envoie à `api.modrinth.com` **uniquement l'empreinte SHA-1 de chaque `.jar`**, puis des identifiants de projets Modrinth : jamais les noms de fichiers, ni les chemins, ni ta base personnelle. Le cache et ta base sont stockés dans `%APPDATA%\ModMaestro` (Windows), `~/Library/Application Support/ModMaestro` (macOS) ou `~/.local/share/modmaestro` (Linux), modifiable avec la variable `MODMAESTRO_HOME`. Le bouton « Vider le cache » conserve ta base personnelle.
+**Par défaut, rien ne quitte ton ordinateur.** Si tu actives Modrinth (interrupteur de l'accueil ou `--online`), ModMaestro envoie à `api.modrinth.com` **uniquement l'empreinte SHA-1 de chaque `.jar`**, puis des identifiants de projets : jamais les noms de fichiers, chemins ou ta base. Le message « Proposer à la communauté » ne part jamais seul : tu le publies toi-même. Le rapport HTML n'inclut aucun chemin par défaut.
 
-Modrinth demande aux applications de s'identifier : renseigne ton lien GitHub dans la variable `MODMAESTRO_CONTACT` (ou dans `CONTACT` de `core/modrinth.py`). `MODMAESTRO_MODRINTH_URL` permet de viser un miroir ou un serveur de test.
+Cache et base personnelle : `%APPDATA%\ModMaestro` (Windows), `~/Library/Application Support/ModMaestro` (macOS) ou `~/.local/share/modmaestro` (Linux) ; variable `MODMAESTRO_HOME` pour en changer. Variables utiles : `MODMAESTRO_CONTACT` (lien GitHub demandé par Modrinth), `MODMAESTRO_REPO` (dépôt visé par « Proposer à la communauté »), `MODMAESTRO_MODRINTH_URL`, `MODMAESTRO_LANG`.
 
-Le serveur de l'interface n'écoute que sur `127.0.0.1`, vérifie l'en-tête `Host` et l'origine des requêtes, et exige un jeton aléatoire régénéré à chaque lancement.
+Le serveur de l'interface n'écoute que sur `127.0.0.1`, vérifie `Host` et `Origin`, et exige un jeton aléatoire par lancement.
 
 ### Structure
 
 ```
 modmaestro/
-├── main.py                 point d'entrée : web, --cli, --audit, --demo
-├── lancer.bat / lancer.sh  lancement en un clic
-├── core/                   parser, versions, analyzer, builder, logscan, report, demo
-│   ├── pipeline.py         analyse complète (locale ou avec Modrinth)
-│   ├── modrinth.py         client de l'API Modrinth (empreintes SHA-1 uniquement)
-│   ├── cache.py            cache SQLite + ta base personnelle
-│   ├── knowledge.py        fusion : base intégrée + communauté + ta base
-│   ├── learn.py            apprentissage, export / import, suggestions depuis un journal
-│   ├── enrich.py           transforme les données Modrinth en alertes
-│   └── data/
-│       ├── knowledge.json  mods clients et conflits connus, passerelles de loader
-│       └── community/      un fichier par mod (sides/) ou par conflit (conflicts/)
-├── tools/check_community.py  valide la base communautaire (à lancer avant une PR)
-├── web/                    serveur local + interface
-├── assets/                 logo, bannière, illustrations (SVG + PNG)
-├── tools/make_assets.py    régénère toute l'identité visuelle
-├── tests/                  74 tests : python -m unittest discover -s tests
-├── BRAND.md                charte graphique
-└── docs/                   captures d'écran
+├── main.py                  point d'entrée : web, menu terminal, commandes
+├── ModMaestro.spec          PyInstaller · tools/build_binaries.py · .github/workflows/build.yml
+├── core/
+│   ├── parser, versions, analyzer, builder, logscan, report, demo   moteur d'analyse
+│   ├── pipeline.py          analyse complète (locale ou avec Modrinth)
+│   ├── compare.py · crashfinder.py · export.py · serverkit.py · recommend.py
+│   ├── htmlreport.py · contribute.py · learn.py · knowledge.py
+│   ├── modrinth.py · cache.py · enrich.py          Modrinth + cache SQLite
+│   ├── i18n.py · i18n_en.py · en/                  traductions (le texte français sert de clé)
+│   └── data/                knowledge.json, recommendations.json, community/
+├── web/                     serveur local + interface (static/i18n/en.json = anglais)
+├── tools/                   check_community.py · check_i18n_js.py · make_assets.py · build_binaries.py
+├── tests/                   python -I -m unittest discover -s tests
+├── assets/ · docs/ · BRAND.md
 ```
 
 ### Contribuer
 
-Ajouter un mod client ou un conflit connu ne demande **aucun code** :
-
-1. crée un fichier dans `core/data/community/sides/<modid>.json` ou `core/data/community/conflicts/<a>__<b>.json` (format et règles dans `core/data/community/README.md`) ;
-2. ou exporte ta base depuis l'onglet « Ma base » et copie les fichiers générés ;
-3. vérifie avec `python tools/check_community.py`, puis ouvre une pull request avec **la source** (log, page Modrinth, issue…).
-
-Les pull requests sont les bienvenues.
+* **Mod client ou conflit connu** (aucun code) : crée `core/data/community/sides/<modid>.json` ou `conflicts/<a>__<b>.json` (format dans `core/data/community/README.md`), ou utilise « Proposer à la communauté ». Vérifie avec `python tools/check_community.py`, puis ouvre une pull request **avec la source** (log, page Modrinth, issue…).
+* **Mod conseillé** : une règle dans `core/data/recommendations.json` (avec `why` et `why_en`).
+* **Traduction** : le français est la clé. Textes Python : `core/en/*.py` ; interface : `web/static/i18n/en.json`. `python -I -m unittest discover -s tests` et `python tools/check_i18n_js.py` signalent tout texte non traduit.
 
 ### Licence
 
-Cet outil est public : tout le monde peut l'utiliser, le modifier et le partager, sous licence **MIT** (voir `LICENSE`).
+Outil public, sous licence **MIT** (voir `LICENSE`).
 
 ---
 
@@ -127,83 +124,85 @@ Cet outil est public : tout le monde peut l'utiliser, le modifier et le partager
 
 ### Overview
 
-ModMaestro is a Python tool that is **local by default**: that reads every `.jar` in a `mods` folder, explains what is wrong in plain language and how to fix it. It also prepares a dedicated-server `mods` folder by removing everything that only matters to the player.
+ModMaestro reads every `.jar` in a `mods` folder, explains what is wrong in plain language and how to fix it, and prepares what a dedicated server needs. It is **local by default**: nothing leaves your computer unless you turn it on.
 
-It supports **NeoForge, Forge, Fabric and Quilt**, including bundled mods (jar-in-jar), so a library already provided by another mod is never reported as missing.
+It supports **NeoForge, Forge, Fabric and Quilt**, including bundled mods (jar-in-jar) and bridges such as Sinytra Connector.
 
-### Technical Stack
+### Features
 
-* **Python 3.11+** — core logic. The engine and the web interface have **no external dependency**.
-* **`zipfile` / `tomllib` / `json`** — in-memory inspection of `.jar` archives (nothing is extracted to disk) and parsing of `neoforge.mods.toml`, `mods.toml`, `fabric.mod.json` and `quilt.mod.json`.
-* **`http.server`** — small local server for the web interface.
-* **HTML / CSS / JavaScript** — framework-free interface, no font downloads, light and dark themes.
-* **Rich** *(optional)* — colours, tables and a progress bar for the terminal menu. Without it, the menu falls back to plain text.
+**Analysis**
+* **Duplicates, dependencies, versions**: several versions of one mod, missing required mods, unmet version ranges (Maven, Fabric, `~`, `^`, `1.21.x`).
+* **Incompatibilities**: conflicts declared by authors and well-known traps (Sodium + OptiFine, two shader engines…).
+* **Loader / Minecraft compatibility**, corrupted or metadata-less files, **client / server** split.
+* **A health score you can trust**: every alert is *certain* or *likely*; only certain ones weigh heavily, and a cascade of estimates no longer collapses the score. If `logs/latest.log` proves the game booted, the pack is **never** called broken. A false alert can be set aside in one click ("Ignore"), or all at once ("This modpack works: ignore all"); they stay visible and reversible.
+* **Modrinth** *(optional, off by default)*: identifies mods by hash, makes the client / server split reliable, adds incompatibilities and updates. Local SQLite cache.
 
-### Core Features
+**Tools**
+* **Compare 2 modpacks**: mods added, removed, updated or downgraded, plus new and fixed problems, with the score change.
+* **Crash cause finder**: reads `latest.log` / crash reports (missing dependency, mixin, Java, memory…), then, when the log says nothing, a **trial search**: ModMaestro builds test folders (dependencies included), you launch the game and answer "crashes" / "works". The suspect is confirmed with a counter-trial.
+* **Export**: `.mrpack` (Modrinth, Prism, ATLauncher…), `.zip` archive, **HTML report** to send to friends (clean mod and problem lists, no path from your computer by default) or Markdown report.
+* **Server folder**: copies the useful mods to a **new** folder; your original folder is never modified. Every choice can be changed.
+* **Optimised launch files**: `start.bat` / `start.sh`, `user_jvm_args.txt`, `server.properties`. Java picked from the Minecraft version, Aikar's flags, estimated memory, auto-restart, adapted to NeoForge, Forge, Fabric or Quilt. `eula.txt` stays `false` until you tick the acceptance yourself.
+* **Suggested mods**: well-known companions that make your other mods work better (performance, crash fixes, libraries), with availability for your version when Modrinth is on.
+* **My base**: a conflict or client-only mod you discover is saved to your personal base, applied to every analysis, and can be exported / imported. **Suggest to the community** prepares a message ready to post on the project repository.
 
-* **Metadata extraction**: `modid`, name, version, loader and dependencies for every mod, bundled ones included.
-* **Duplicate detection**: several versions of the same mod, with the version to keep (the newest).
-* **Dependency audit**: missing required mods, and installed versions that fall outside the requested range (Maven `[1.0,2.0)` and Fabric `>=1.0 <2`, `~`, `^`, `1.21.x` ranges).
-* **Incompatibilities**: conflicts declared by authors, plus known pitfalls (Sodium + OptiFine, two shader engines…).
-* **Loader and Minecraft compatibility**: Fabric mod in a NeoForge pack, Forge mod in a NeoForge pack, corrupt or metadata-less files, mods targeting another Minecraft version.
-* **Environment separation**: strictly client-side mods (renderers, mini-maps, HUDs) are removed automatically. A client mod required by a kept mod is **kept**.
-* **Server build**: copies the selected mods into a **new** folder (never into your original one), with an optional `.zip`. Every choice can be overridden.
-* **Crash-log diagnosis**: `latest.log` or crash report → missing dependency, duplicate, client mod on server, wrong Java version, out of memory, failed mixin…
-* **Report**: Markdown export of the full audit.
-* **Modrinth** *(optional, off by default)*: recognises your mods by hash, makes client/server sorting more reliable, adds incompatibilities and dependencies declared on Modrinth, and reports available updates.
-* **SQLite cache**: Modrinth answers are kept on your computer (7 days for a known mod, 1 day for an unknown one, 12 h for updates). A second analysis of the same pack makes no request at all.
-* **Community knowledge base**: one JSON file per mod or per conflict in `core/data/community/`, easy to submit as a pull request, with automatic validation.
-* **Learning**: a conflict or client-only mod you discover — or that shows up in a crash log — is saved to **your personal base** ("My base" tab, or `m` in the menu), applied to every later analysis, and can be exported / imported to be shared.
-* **Loader bridges**: with Sinytra Connector, Fabric mods in a NeoForge pack are reported as information, not errors.
+**Interface**
+* **French / English** (selector at the bottom of the menu; alerts, reports and the terminal follow the language) and gentle animations you can turn off ("Animations" setting; `prefers-reduced-motion` is respected).
+* Light / dark theme, works on small screens.
 
 ### Install and Run
 
-You need **Python 3.11 or newer** ([python.org](https://www.python.org/downloads/)).
+**Without Python**: download the app for your system from [Releases](../../releases) (`ModMaestro-Windows-x64.zip`, `ModMaestro-Linux-x64.tar.gz`, `ModMaestro-macOS-arm64.zip` or `-x64.zip`), unpack and run `ModMaestro`. It opens the interface in your browser. *(Unsigned: Windows SmartScreen and macOS Gatekeeper ask for confirmation on first launch.)*
 
-| System | Web interface |
+**With Python 3.11+** ([python.org](https://www.python.org/downloads/)):
+
+| System | Launch |
 |---|---|
 | Windows | double-click `lancer.bat` |
 | Linux / macOS | `./lancer.sh` |
 | Anywhere | `python main.py` |
 
 ```bash
-python main.py "/path/to/mods"          # web interface, analysis starts immediately
-python main.py --demo                   # try it with a fake modpack
-python main.py --cli                    # interactive terminal menu
-python main.py --audit "/path/to/mods"  # quick audit; exit code 1 if errors are found
-python main.py --audit "/path/to/mods" --online   # same, querying Modrinth
-python main.py --kb                     # show your personal base
-python main.py --export-kb my-base.json # export it (--import-kb to import one)
-pip install -r requirements.txt         # optional: installs Rich for the terminal menu
+python main.py "/path/to/mods"                         # web interface, analysis started
+python main.py --lang en --demo                        # try it with a fake modpack, in English
+python main.py --cli                                   # interactive terminal menu
+python main.py --audit "/mods" [--online]              # quick audit; exit code 1 if there are errors
+python main.py --compare "/pack_before" "/pack_after"  # compare two modpacks
+python main.py --html report.html "/mods"              # shareable HTML report
+python main.py --export-mrpack pack.mrpack "/mods" --loader-version 21.1.172
+python main.py --server-kit "/new/folder" "/mods" --ram 8 [--accept-eula]
+python main.py --find-crash "/mods"                    # trial search for the faulty mod
+python main.py --recommend "/mods"                     # suggested mods
+python main.py --kb | --export-kb f.json | --import-kb f.json   # your personal base
 ```
 
-The path can be the `mods` folder, an instance root (the `mods/` folder is found automatically, including `minecraft/mods` and `.minecraft/mods` for Prism or MultiMC), or a `.zip` archive containing a `mods/` folder.
+The folder can be the `mods` folder, an instance root (the `mods/` folder is found automatically, Prism and MultiMC included) or a `.zip` containing a `mods/` folder.
+
+**Build it yourself**: `pip install pyinstaller rich`, then `python tools/build_binaries.py` → `dist/ModMaestro`. PyInstaller only builds for the system it runs on; the GitHub Actions workflow (`.github/workflows/build.yml`) produces Windows, Linux and macOS: it runs the tests, checks that each executable starts, and publishes them to a Release when you push a `vX.Y.Z` tag.
 
 ### Limitations
 
-* Client/server sorting is an **estimate**: it relies on what each mod declares, then on an editable list of known mods (`core/data/knowledge.json`). When unsure, a mod is flagged "to check" and kept.
-* Code conflicts that nobody declares can only be found by launching the game — that is what the log diagnosis is for.
-* Modrinth only knows the mods published there (not CurseForge, nor private mods): an unknown mod is simply analysed from its local metadata. A dependency reported "missing" by Modrinth is only a **warning**: the mod may already bundle it.
-* The bundled community base is a **starting point** (a handful of entries): it only grows if you contribute.
+* The client / server split is an **estimate**; when unsure the mod is marked "to check" and kept.
+* Conflicts nobody declares only show at launch: hence the crash log and the trial search (it needs a reproducible crash and a game restart for each trial).
+* Modrinth only knows mods published there (not CurseForge). A `.mrpack` references recognised mods and embeds the others.
+* The server launcher assumes you installed the server (Forge / NeoForge / Fabric / Quilt) in the folder; ModMaestro generates the scripts, not the loader installation.
+* Windows and macOS executables are built by GitHub Actions; only the Linux build was tried by hand.
+* The bundled community base is a **starting point**: it only grows if you contribute.
 
 ### Privacy and Security
 
-**By default, nothing leaves your computer.** If you enable Modrinth (the switch on the home screen, `--online`, or `o` in the menu), ModMaestro sends `api.modrinth.com` **only the SHA-1 hash of each `.jar`**, then Modrinth project IDs — never file names, paths or your personal base. The cache and your base live in `%APPDATA%\ModMaestro` (Windows), `~/Library/Application Support/ModMaestro` (macOS) or `~/.local/share/modmaestro` (Linux); override with `MODMAESTRO_HOME`. "Clear cache" keeps your personal base.
+**By default nothing leaves your computer.** If you turn on Modrinth (home-page switch or `--online`), ModMaestro sends `api.modrinth.com` **only the SHA-1 hash of each `.jar`**, then project ids: never file names, paths or your base. The "Suggest to the community" message is never sent by itself: you post it yourself. The HTML report contains no path by default.
 
-Modrinth asks applications to identify themselves: put your GitHub link in the `MODMAESTRO_CONTACT` variable (or in `CONTACT` in `core/modrinth.py`). `MODMAESTRO_MODRINTH_URL` points to a mirror or a test server.
+Cache and personal base: `%APPDATA%\ModMaestro` (Windows), `~/Library/Application Support/ModMaestro` (macOS) or `~/.local/share/modmaestro` (Linux); set `MODMAESTRO_HOME` to change it. Useful variables: `MODMAESTRO_CONTACT` (GitHub link Modrinth asks for), `MODMAESTRO_REPO` (repository targeted by "Suggest to the community"), `MODMAESTRO_MODRINTH_URL`, `MODMAESTRO_LANG`.
 
-The interface server only listens on `127.0.0.1`, checks the `Host` header and request origin, and requires a random token regenerated at every launch.
+The interface server only listens on `127.0.0.1`, checks `Host` and `Origin`, and requires a random token per launch.
 
 ### Contributing
 
-Adding a known client mod or conflict needs **no code**:
-
-1. create `core/data/community/sides/<modid>.json` or `core/data/community/conflicts/<a>__<b>.json` (format and rules in `core/data/community/README.md`);
-2. or export your base from the "My base" tab and copy the generated files;
-3. check with `python tools/check_community.py`, then open a pull request including **the source** (log, Modrinth page, issue…).
-
-Pull requests are welcome.
+* **Client-only mod or known conflict** (no code): create `core/data/community/sides/<modid>.json` or `conflicts/<a>__<b>.json` (format in `core/data/community/README.md`), or use "Suggest to the community". Check with `python tools/check_community.py`, then open a pull request **with the source** (log, Modrinth page, issue…).
+* **Suggested mod**: add a rule to `core/data/recommendations.json` (with `why` and `why_en`).
+* **Translation**: French is the key. Python texts: `core/en/*.py`; interface: `web/static/i18n/en.json`. `python -I -m unittest discover -s tests` and `python tools/check_i18n_js.py` flag any untranslated text.
 
 ### License
 
-This tool is public: anyone can use, modify and share it under the **MIT** license (see `LICENSE`).
+Public tool under the **MIT** license (see `LICENSE`).

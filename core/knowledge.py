@@ -23,6 +23,7 @@ import os
 import re
 
 from .analyzer import load_knowledge
+from .i18n import _
 from .cache import user_data_dir
 
 ID_RE = re.compile(r"^[a-z0-9_.\-]{1,64}$")
@@ -49,13 +50,13 @@ def normalize_id(modid) -> str:
 
 def _id_list(value, label: str, errors: list[str]) -> list[str]:
     if not isinstance(value, list) or not value:
-        errors.append(f"« {label} » doit être une liste non vide d'identifiants.")
+        errors.append(_("« {label} » doit être une liste non vide d'identifiants.", label=label))
         return []
     out = []
     for v in value:
         n = normalize_id(v)
         if not ID_RE.match(n):
-            errors.append(f"Identifiant invalide dans « {label} » : {v!r} (a-z, 0-9, _ . - uniquement).")
+            errors.append(_("Identifiant invalide dans « {label} » : {value} (a-z, 0-9, _ . - uniquement).", label=label, value=repr(v)))
         else:
             out.append(n)
     return out
@@ -64,33 +65,33 @@ def _id_list(value, label: str, errors: list[str]) -> list[str]:
 def validate_side(d) -> list[str]:
     errors: list[str] = []
     if not isinstance(d, dict):
-        return ["L'entrée doit être un objet JSON."]
+        return [_("L'entrée doit être un objet JSON.")]
     if not ID_RE.match(normalize_id(d.get("modid"))):
-        errors.append("« modid » manquant ou invalide.")
+        errors.append(_("« modid » manquant ou invalide."))
     if d.get("side") not in SIDES:
-        errors.append("« side » doit valoir « client » ou « both ».")
+        errors.append(_("« side » doit valoir « client » ou « both »."))
     if not str(d.get("reason") or "").strip():
-        errors.append("« reason » est obligatoire : explique pourquoi.")
+        errors.append(_("« reason » est obligatoire : explique pourquoi."))
     return errors
 
 
 def validate_conflict(d) -> list[str]:
     errors: list[str] = []
     if not isinstance(d, dict):
-        return ["L'entrée doit être un objet JSON."]
+        return [_("L'entrée doit être un objet JSON.")]
     if "group" in d:
         if len(_id_list(d["group"], "group", errors)) < 2 and not errors:
-            errors.append("« group » doit contenir au moins deux mods.")
+            errors.append(_("« group » doit contenir au moins deux mods."))
     elif "a" in d and "b" in d:
         _id_list(d["a"], "a", errors)
         _id_list(d["b"], "b", errors)
     else:
-        errors.append("Il faut soit « group », soit « a » et « b ».")
+        errors.append(_("Il faut soit « group », soit « a » et « b »."))
     if d.get("severity") not in SEVERITIES:
-        errors.append("« severity » doit valoir error, warning ou info.")
+        errors.append(_("« severity » doit valoir error, warning ou info."))
     for key in ("title", "message"):
         if not str(d.get(key) or "").strip():
-            errors.append(f"« {key} » est obligatoire.")
+            errors.append(_("« {key} » est obligatoire.", key=key))
     return errors
 
 
@@ -110,7 +111,7 @@ def _read_entries(folder: str, validate) -> tuple[list[dict], list[str]]:
             with open(path, encoding="utf-8") as fh:
                 raw = json.load(fh)
         except (OSError, ValueError) as exc:
-            errors.append(f"{name} : fichier illisible ({exc}).")
+            errors.append(_("{name} : fichier illisible ({exc}).", name=name, exc=exc))
             continue
         for item in raw if isinstance(raw, list) else [raw]:
             problems = validate(item)
@@ -145,11 +146,12 @@ def load_all(cache=None, community_dirs: list[str] | None = None) -> dict:
     kb.setdefault("client_only", {}).setdefault("ids", [])
     kb.setdefault("conflict_rules", [])
     kb["force_both"] = []
+    kb["_ignored"] = []
     errors: list[str] = []
     n_sides = n_conflicts = 0
 
-    for folder, label in ([(d, "communauté") for d in community_dirs] if community_dirs is not None
-                          else [(builtin_dir(), "communauté"), (user_community_dir(), "tes fichiers")]):
+    for folder, label in ([(d, _("communauté")) for d in community_dirs] if community_dirs is not None
+                          else [(builtin_dir(), _("communauté")), (user_community_dir(), _("tes fichiers"))]):
         loaded = load_dir(folder)
         errors += loaded["errors"]
         for s in loaded["sides"]:
@@ -163,14 +165,16 @@ def load_all(cache=None, community_dirs: list[str] | None = None) -> dict:
     if cache is not None:
         for row in cache.list_learned():
             n_learned += 1
-            if row["kind"] == "side":
+            if row["kind"] == "ignore":
+                kb["_ignored"].append(row["a"])
+            elif row["kind"] == "side":
                 (kb["client_only"]["ids"] if row["side"] == "client" else kb["force_both"]).append(row["a"])
             elif row["kind"] == "conflict":
                 kb["conflict_rules"].append({
                     "a": [row["a"]], "b": [row["b"]], "severity": row["severity"] or "error",
                     "title": f"{row['a']} ↔ {row['b']}",
-                    "message": row["note"] or "Tu as signalé ces deux mods comme incompatibles.",
-                    "fix": "Retire l'un des deux mods.", "source": "ta base personnelle"})
+                    "message": row["note"] or _("Tu as signalé ces deux mods comme incompatibles."),
+                    "fix": _("Retire l'un des deux mods."), "source": _("ta base personnelle")})
     kb["_stats"] = {"community_sides": n_sides, "community_conflicts": n_conflicts,
                     "learned": n_learned, "errors": errors}
     return kb

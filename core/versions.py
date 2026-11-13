@@ -203,10 +203,31 @@ def fabric_satisfies(spec, version: str | None) -> bool:
     return False
 
 
-def satisfies(syntax: str, spec, version: str | None) -> bool:
+def _strict(syntax: str, spec, version: str | None) -> bool:
     if syntax == "maven":
         return maven_contains(spec if isinstance(spec, str) or spec is None else str(spec), version)
     return fabric_satisfies(spec, version)
+
+
+_MC_PREFIX = re.compile(r"^(?:mc)?1\.\d{1,2}(?:\.\d+)?[-_+](.+)$", re.IGNORECASE)
+_MC_SUFFIX = re.compile(r"^(.+?)[-_+](?:mc)?1\.\d{1,2}(?:\.\d+)?$", re.IGNORECASE)
+
+
+def satisfies(syntax: str, spec, version: str | None) -> bool:
+    """Vrai si `version` respecte `spec`.
+
+    Beaucoup de mods écrivent leur version avec la version de Minecraft devant ou derrière
+    (« 1.20.1-47.1.3 », « mc1.20.1-0.5.2 », « 2.0+1.20.1 ») alors que les plages visent le numéro du mod seul :
+    on réessaie donc sans ce préfixe / suffixe, pour ne pas signaler un faux problème.
+    """
+    if _strict(syntax, spec, version):
+        return True
+    v = str(version or "")
+    for rx in (_MC_PREFIX, _MC_SUFFIX):
+        m = rx.match(v)
+        if m and _strict(syntax, spec, m.group(1)):
+            return True
+    return False
 
 
 def candidate_versions(spec) -> set[str]:

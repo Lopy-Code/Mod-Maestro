@@ -16,11 +16,14 @@ from core.cache import Cache  # noqa: E402
 from test_core import neo  # noqa: E402
 
 
-def ver(vid, pid, number, date="2024-01-01T00:00:00Z", vtype="release", gv=("1.21.1",), deps=()):
+def ver(vid, pid, number, date="2024-01-01T00:00:00Z", vtype="release", gv=("1.21.1",), deps=(), loaders=("neoforge",),
+        file_hash=None):
+    f = {"filename": f"{vid}.jar", "url": f"https://cdn.modrinth.com/data/{pid}/versions/{vid}/{vid}.jar", "size": 1,
+         "hashes": {"sha1": file_hash or "0" * 40, "sha512": "0" * 128}}
     return {"id": vid, "project_id": pid, "version_number": number, "version_type": vtype,
-            "date_published": date, "game_versions": list(gv), "loaders": ["neoforge"],
+            "date_published": date, "game_versions": list(gv), "loaders": list(loaders),
             "dependencies": [{"project_id": p, "version_id": None, "dependency_type": t} for p, t in deps],
-            "files": [{"filename": "ignored.jar"}]}
+            "files": [f]}
 
 
 def proj(pid, slug, title, cs="required", ss="required"):
@@ -32,6 +35,7 @@ class FakeModrinth:
 
     def __init__(self):
         self.versions, self.projects, self.latest = {}, {}, {}
+        self.by_slug: dict = {}  # slug -> liste de versions (route /project/<slug>/version)
         self.calls: list[str] = []
         self.agents: list[str] = []
         self.fail: list[int] = []
@@ -65,6 +69,14 @@ class FakeModrinth:
                 if path == "/projects":
                     ids = json.loads(parse_qs(urlparse(self.path).query)["ids"][0])
                     return self._reply(200, [outer.projects[i] for i in ids if i in outer.projects])
+                if path.startswith("/project/") and path.endswith("/version"):
+                    slug = path.split("/")[2]
+                    q = parse_qs(urlparse(self.path).query)
+                    loaders = json.loads(q.get("loaders", ["[]"])[0])
+                    gvs = json.loads(q.get("game_versions", ["[]"])[0])
+                    rows = [v for v in outer.by_slug.get(slug, [])
+                            if (not loaders or set(loaders) & set(v["loaders"])) and (not gvs or set(gvs) & set(v["game_versions"]))]
+                    return self._reply(200, rows)
                 return self._reply(404, {})
 
             def do_GET(self):

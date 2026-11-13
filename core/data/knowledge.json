@@ -185,6 +185,15 @@
         "fabric",
         "quilt"
       ]
+    },
+    {
+      "id": "connector",
+      "name": "Sinytra Connector",
+      "loader": "forge",
+      "accepts": [
+        "fabric",
+        "quilt"
+      ]
     }
   ]
 }

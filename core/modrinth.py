@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from . import __version__
+from .i18n import _
 
 API = "https://api.modrinth.com/v2"
 WEB = "https://modrinth.com"
@@ -61,6 +62,12 @@ def slim_version(v: dict) -> dict:
             {"project_id": d.get("project_id"), "version_id": d.get("version_id"),
              "dependency_type": d.get("dependency_type")}
             for d in (v.get("dependencies") or []) if isinstance(d, dict)
+        ],
+        # fichiers téléchargeables (utile pour exporter un .mrpack)
+        "files": [
+            {"url": f.get("url"), "filename": f.get("filename"), "size": f.get("size"),
+             "sha1": (f.get("hashes") or {}).get("sha1"), "sha512": (f.get("hashes") or {}).get("sha512")}
+            for f in (v.get("files") or []) if isinstance(f, dict)
         ],
     }
 
@@ -108,18 +115,18 @@ class Modrinth:
                     self._sleep(1 + attempt)
                     continue
                 if exc.code == 429:
-                    raise ModrinthError("Modrinth limite le nombre de requêtes : réessaie dans une minute.") from exc
-                raise ModrinthError(f"Modrinth a répondu par une erreur {exc.code}.") from exc
+                    raise ModrinthError(_("Modrinth limite le nombre de requêtes : réessaie dans une minute.")) from exc
+                raise ModrinthError(_("Modrinth a répondu par une erreur {code}.", code=exc.code)) from exc
             except (urllib.error.URLError, TimeoutError, OSError) as exc:
                 if attempt < self.max_retries:
                     self._sleep(1 + attempt)
                     continue
                 raise ModrinthError(
-                    "Modrinth est injoignable (pas de connexion, pare-feu ou proxy ?). "
-                    "L'analyse continue avec les données locales.") from exc
+                    _("Modrinth est injoignable (pas de connexion, pare-feu ou proxy ?). "
+                      "L'analyse continue avec les données locales.")) from exc
             except ValueError as exc:  # JSON invalide
-                raise ModrinthError("Réponse inattendue de Modrinth.") from exc
-        raise ModrinthError("Modrinth est injoignable.")  # pragma: no cover
+                raise ModrinthError(_("Réponse inattendue de Modrinth.")) from exc
+        raise ModrinthError(_("Modrinth est injoignable."))  # pragma: no cover
 
     def versions_by_hashes(self, hashes: list[str]) -> dict:
         """sha1 → version (réduite). Les empreintes inconnues sont absentes de la réponse."""
@@ -129,6 +136,16 @@ class Modrinth:
     def projects(self, ids: list[str]) -> list[dict]:
         res = self._request("GET", "/projects", query={"ids": json.dumps(ids)})
         return [slim_project(p) for p in res] if isinstance(res, list) else []
+
+    def project_versions(self, slug: str, loaders: list[str], game_versions: list[str]) -> list[dict]:
+        """Versions d'un projet pour un loader et une version de Minecraft (la plus récente d'abord)."""
+        query = {}
+        if loaders:
+            query["loaders"] = json.dumps(loaders)
+        if game_versions:
+            query["game_versions"] = json.dumps(game_versions)
+        res = self._request("GET", f"/project/{urllib.parse.quote(slug)}/version", query=query)
+        return [slim_version(v) for v in res] if isinstance(res, list) else []
 
     def latest_by_hashes(self, hashes: list[str], loaders: list[str], game_versions: list[str]) -> dict:
         body: dict = {"hashes": hashes, "algorithm": "sha1"}
@@ -180,6 +197,7 @@ def identify(jars, client: Modrinth, cache, progress: Callable[[str, int, int], 
 
     unique = sorted(set(file_hash.values()))
     cached = cache.get_files(unique) if cache else {}
+    cached = {h: v for h, v in cached.items() if v is None or "files" in v}  # entrées d'avant « files » : à redemander
     todo = [h for h in unique if h not in cached]
     versions: dict[str, dict | None] = dict(cached)
     out.stats = {"total": len(file_hash), "identified": 0, "unknown": 0,
@@ -230,7 +248,7 @@ def identify(jars, client: Modrinth, cache, progress: Callable[[str, int, int], 
             "server_side": p.get("server_side", "unknown"), "version_id": v["id"],
             "version_number": v["version_number"], "version_type": v["version_type"],
             "date_published": v["date_published"], "game_versions": v["game_versions"],
-            "loaders": v["loaders"], "dependencies": v["dependencies"],
+            "loaders": v["loaders"], "dependencies": v["dependencies"], "files": v.get("files", []),
             "url": project_url(p.get("slug") or v["project_id"]),
         }
         out.stats["identified"] += 1

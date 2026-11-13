@@ -1,0 +1,69 @@
+name: Tests et exécutables
+
+on:
+  push: { branches: [main], tags: ["v*"] }
+  pull_request: { branches: [main] }
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: { python: ["3.11", "3.13"] }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ matrix.python }}" }
+      - run: python -I -W error::ResourceWarning -m unittest discover -s tests
+      - run: python tools/check_community.py
+      - run: python tools/check_i18n_js.py
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, name: ModMaestro-Windows-x64, binary: dist/ModMaestro.exe }
+          - { os: ubuntu-latest,  name: ModMaestro-Linux-x64,   binary: dist/ModMaestro }
+          - { os: macos-latest,   name: ModMaestro-macOS-arm64, binary: dist/ModMaestro }
+          - { os: macos-13,       name: ModMaestro-macOS-x64,   binary: dist/ModMaestro }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: python -m pip install --upgrade pip pyinstaller rich
+      - run: python tools/build_binaries.py
+      - name: Test de fumée (l'application démarre et sert l'interface)
+        shell: bash
+        run: |
+          MODMAESTRO_HOME="$RUNNER_TEMP/mm" ./${{ matrix.binary }} --no-browser --port 8799 &
+          sleep 6
+          curl --fail --silent http://127.0.0.1:8799/ | grep -q "ModMaestro"
+          curl --fail --silent -o /dev/null http://127.0.0.1:8799/assets/logo.svg
+          kill %1
+      - name: Archive
+        shell: bash
+        run: |
+          mkdir out
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            powershell -Command "Compress-Archive -Path ${{ matrix.binary }} -DestinationPath out/${{ matrix.name }}.zip"
+          elif [ "${{ runner.os }}" = "Linux" ]; then
+            chmod +x ${{ matrix.binary }} && tar -czf out/${{ matrix.name }}.tar.gz -C dist ModMaestro
+          else
+            chmod +x ${{ matrix.binary }} && (cd dist && zip -q ../out/${{ matrix.name }}.zip ModMaestro)
+          fi
+      - uses: actions/upload-artifact@v4
+        with: { name: "${{ matrix.name }}", path: out/* }
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions: { contents: write }
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: out, merge-multiple: true }
+      - uses: softprops/action-gh-release@v2
+        with: { files: out/*, generate_release_notes: true }

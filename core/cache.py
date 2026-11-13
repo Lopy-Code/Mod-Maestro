@@ -21,6 +21,8 @@ import sys
 import threading
 import time
 
+from .i18n import _
+
 FOUND_TTL = 7 * 86400      # un fichier reconnu reste valable 7 jours
 MISS_TTL = 1 * 86400       # un fichier inconnu de Modrinth est redemandé après 1 jour
 PROJECT_TTL = 7 * 86400
@@ -201,7 +203,7 @@ def get_cache() -> Cache:
                 _default = Cache()
             except (sqlite3.Error, OSError) as exc:
                 _default = Cache(":memory:")
-                _default.degraded = f"Impossible d'utiliser le cache sur le disque ({exc}) : il ne durera que le temps de cette session."
+                _default.degraded = _("Impossible d'utiliser le cache sur le disque ({exc}) : il ne durera que le temps de cette session.", exc=exc)
         return _default
 
 

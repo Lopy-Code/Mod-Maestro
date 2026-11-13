@@ -239,8 +239,9 @@ class AnalyzerTests(unittest.TestCase):
         neo(self.d, "old.jar", "old", mc="[1.20.1,1.20.2)")
         a = run(self.d)
         self.assertEqual(a.mc_version, "1.21")
-        (m,) = ids(a, "mc:")
+        (m,) = ids(a, "mc-versions")
         self.assertEqual(m["severity"], "error")
+        self.assertEqual([o["file"] for o in m["data"]["items"]], ["old.jar"])
 
     def test_multi_loader_jar_uses_matching_loader(self):
         for i in range(3):
@@ -372,7 +373,7 @@ class DemoEndToEnd(unittest.TestCase):
             res = a.to_dict()
             self.assertEqual(res["loader"], "neoforge")
             kinds = {i["id"].split(":")[0] for i in res["issues"]}
-            self.assertTrue({"dup", "missing", "version", "incompat", "known", "loader", "mc", "file", "nometa"} <= kinds)
+            self.assertTrue({"dup", "missing", "version", "incompat", "known", "loader", "mc-versions", "file", "nometa"} <= kinds)
             self.assertEqual(ids(a, "missing:gearlib"), [])  # fourni en jar-in-jar
             self.assertTrue(logscan.find_logs(folder))
 

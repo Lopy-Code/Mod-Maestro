@@ -7,7 +7,8 @@ from __future__ import annotations
 
 from typing import Callable
 
-from . import analyzer, enrich, knowledge, modrinth, parser
+from . import analyzer, enrich, knowledge, logscan, modrinth, parser
+from .i18n import _
 from .cache import get_cache
 
 LOADERS_FOR = {"neoforge": ["neoforge"], "forge": ["forge"], "fabric": ["fabric"], "quilt": ["quilt", "fabric"]}
@@ -31,6 +32,17 @@ def run_analysis(path: str, online: bool = False, progress: Progress | None = No
 
     a = analyzer.analyze(jars, extras, source=path, mods_dir=mods_dir, notes=notes, knowledge=kb,
                          online=data.files if data else None)
+    a.boot = logscan.boot_status(mods_dir, [j.mtime for j in jars])
+    if a.boot and a.boot["status"] == "crashed" and a.boot["fresh"]:
+        try:
+            titles = [f["title"] for f in logscan.scan_text(logscan.read_log(a.boot["path"]))][:3]
+        except (OSError, ValueError):
+            titles = []
+        a.add_issue("boot-crash", "error", "files", _("Le dernier lancement a échoué"),
+                    _("{log} indique que le jeu n'a pas démarré.", log=a.boot["log"])
+                    + (" " + _("Causes repérées : {titles}.", titles=" · ".join(titles)) if titles else ""),
+                    fix=_("Ouvre « Journal de crash » pour le détail, ou « Trouver le mod fautif » pour isoler la cause."),
+                    confidence="certain")
     if cache.degraded:
         a.notes.append(cache.degraded)
     for err in kb["_stats"]["errors"][:3]:

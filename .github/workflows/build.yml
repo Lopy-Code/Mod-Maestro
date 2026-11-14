@@ -27,7 +27,6 @@ jobs:
           - { os: windows-latest, name: ModMaestro-Windows-x64, binary: dist/ModMaestro.exe }
           - { os: ubuntu-latest,  name: ModMaestro-Linux-x64,   binary: dist/ModMaestro }
           - { os: macos-latest,   name: ModMaestro-macOS-arm64, binary: dist/ModMaestro }
-          - { os: macos-13,       name: ModMaestro-macOS-x64,   binary: dist/ModMaestro }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

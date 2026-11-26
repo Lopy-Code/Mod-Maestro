@@ -66,7 +66,7 @@ def slim_version(v: dict) -> dict:
         # fichiers téléchargeables (utile pour exporter un .mrpack)
         "files": [
             {"url": f.get("url"), "filename": f.get("filename"), "size": f.get("size"),
-             "sha1": (f.get("hashes") or {}).get("sha1"), "sha512": (f.get("hashes") or {}).get("sha512")}
+             "sha1": (f.get("hashes") or {}).get("sha1"), "sha512": (f.get("hashes") or {}).get("sha512"), "primary": bool(f.get("primary"))}
             for f in (v.get("files") or []) if isinstance(f, dict)
         ],
     }
@@ -297,7 +297,12 @@ def check_updates(online: OnlineData, loaders: list[str], client: Modrinth, cach
             continue
         if latest["version_type"] != "release" and info["version_type"] == "release":
             continue  # on ne propose pas une alpha / bêta à quelqu'un qui est en version stable
+        files = [f for f in latest.get("files", []) if str(f.get("filename", "")).lower().endswith(".jar") and f.get("url") and f.get("sha1")]
+        main = next((f for f in files if f.get("primary")), files[0] if files else None)
         updates.append({"file": fname, "name": info["title"] or fname, "current": info["version_number"],
-                        "latest": latest["version_number"], "url": info["url"]})
+                        "latest": latest["version_number"], "url": info["url"],
+                        # fichier à télécharger pour la mise à jour (core.updater) : adresse + empreintes
+                        "new": {"filename": main["filename"], "url": main["url"], "size": main.get("size") or 0,
+                                "sha1": main.get("sha1"), "sha512": main.get("sha512"), "version_id": latest.get("id")} if main else None})
     updates.sort(key=lambda u: u["name"].lower())
     return updates, error

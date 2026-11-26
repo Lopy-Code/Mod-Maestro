@@ -118,7 +118,7 @@
     if (S.a) $("#crumb-path").textContent = S.a.mods_dir;
     countUps();
   }
-  const NEEDS_ANALYSIS = new Set(["audit", "mods", "tips", "server", "export"]);
+  const NEEDS_ANALYSIS = new Set(["audit", "mods", "tips", "server", "export", "updates"]);
   function updateNav() {
     const has = !!S.a;
     $$(".nav-item").forEach((b) => {

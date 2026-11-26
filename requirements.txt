@@ -1,3 +1,7 @@
 # Facultatif : améliore le menu dans le terminal (couleurs, tableaux, barre de progression).
 # L'interface web et le moteur d'analyse n'ont AUCUNE dépendance.
 rich>=13.0
+
+# Facultatif : affiche l'interface dans une fenêtre d'application au lieu du navigateur (Windows, macOS ; Linux : GTK ou Qt requis).
+# Sans lui, ModMaestro s'ouvre dans le navigateur comme avant.
+# pywebview>=5.0

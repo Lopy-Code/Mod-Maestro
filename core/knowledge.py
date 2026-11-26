@@ -40,6 +40,11 @@ def user_community_dir() -> str:
     return os.path.join(user_data_dir(), "community")
 
 
+def synced_community_dir() -> str:
+    """Entrées téléchargées avec le bouton « Mettre à jour la base communautaire » (core.communitysync)."""
+    return os.path.join(user_data_dir(), "community_sync")
+
+
 def normalize_id(modid) -> str:
     return str(modid or "").strip().lower()
 
@@ -149,16 +154,27 @@ def load_all(cache=None, community_dirs: list[str] | None = None) -> dict:
     kb["_ignored"] = []
     errors: list[str] = []
     n_sides = n_conflicts = 0
+    seen: set = set()
 
     for folder, label in ([(d, _("communauté")) for d in community_dirs] if community_dirs is not None
-                          else [(builtin_dir(), _("communauté")), (user_community_dir(), _("tes fichiers"))]):
+                          else [(builtin_dir(), _("communauté")), (synced_community_dir(), _("communauté")),
+                           (user_community_dir(), _("tes fichiers"))]):
         loaded = load_dir(folder)
         errors += loaded["errors"]
         for s in loaded["sides"]:
+            if ("side", normalize_id(s["modid"]), s["side"]) in seen:
+                continue
+            seen.add(("side", normalize_id(s["modid"]), s["side"]))
             (kb["client_only"]["ids"] if s["side"] == "client" else kb["force_both"]).append(normalize_id(s["modid"]))
             n_sides += 1
         for c in loaded["conflicts"]:
-            kb["conflict_rules"].append(_rule(c, label))
+            rule = _rule(c, label)
+            key = (tuple(sorted(rule["group"])) if "group" in rule else (tuple(sorted(rule["a"])), tuple(sorted(rule["b"]))),
+                   rule.get("title"))
+            if key in seen:      # même entrée dans la base fournie et dans la mise à jour : une seule alerte
+                continue
+            seen.add(key)
+            kb["conflict_rules"].append(rule)
             n_conflicts += 1
 
     n_learned = 0

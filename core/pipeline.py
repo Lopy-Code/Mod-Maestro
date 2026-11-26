@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from . import analyzer, enrich, knowledge, logscan, modrinth, parser
+from . import analyzer, configscan, enrich, knowledge, logscan, modrinth, parser, stacktrace
 from .i18n import _
 from .cache import get_cache
 
@@ -18,10 +18,10 @@ Progress = Callable[[str, int, int], None]
 
 def run_analysis(path: str, online: bool = False, progress: Progress | None = None,
                  cache=None, client: modrinth.Modrinth | None = None) -> analyzer.Analysis:
-    """`progress(étape, fait, total)` avec étape ∈ scan | hash | query | projects | updates."""
+    """`progress(étape, fait, total)` avec étape ∈ scan | download | hash | query | projects | updates."""
     prog = progress or (lambda stage, done, total: None)
     cache = cache if cache is not None else get_cache()
-    mods_dir, notes = parser.resolve_source(path)
+    mods_dir, notes = parser.resolve_source(path, online=online, progress=prog)
     jars, extras = parser.scan_folder(mods_dir, progress=lambda d, t: prog("scan", d, t))
     kb = knowledge.load_all(cache)
 
@@ -35,7 +35,11 @@ def run_analysis(path: str, online: bool = False, progress: Progress | None = No
     a.boot = logscan.boot_status(mods_dir, [j.mtime for j in jars])
     if a.boot and a.boot["status"] == "crashed" and a.boot["fresh"]:
         try:
-            titles = [f["title"] for f in logscan.scan_text(logscan.read_log(a.boot["path"]))][:3]
+            log_text = logscan.read_log(a.boot["path"])
+            titles = [f["title"] for f in logscan.scan_text(log_text)][:3]
+            sus = [s for s in stacktrace.from_analysis(a, log_text)["suspects"] if s["confidence"] != "heuristic"][:3]
+            if sus:
+                titles.append(_("mod(s) suspect(s) d'après la pile d'erreur : {mods}", mods=", ".join(s["name"] for s in sus)))
         except (OSError, ValueError):
             titles = []
         a.add_issue("boot-crash", "error", "files", _("Le dernier lancement a échoué"),
@@ -43,6 +47,7 @@ def run_analysis(path: str, online: bool = False, progress: Progress | None = No
                     + (" " + _("Causes repérées : {titles}.", titles=" · ".join(titles)) if titles else ""),
                     fix=_("Ouvre « Journal de crash » pour le détail, ou « Trouver le mod fautif » pour isoler la cause."),
                     confidence="certain")
+    configscan.apply(a, mods_dir)
     if cache.degraded:
         a.notes.append(cache.degraded)
     for err in kb["_stats"]["errors"][:3]:

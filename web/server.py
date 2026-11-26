@@ -9,7 +9,9 @@ from __future__ import annotations
 import json
 import mimetypes
 import os
+import re
 import secrets
+import shutil
 import socket
 import sys
 import tempfile
@@ -21,8 +23,8 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import sqlite3
 
-from core import (__version__, builder, compare, contribute, crashfinder, demo, export, htmlreport, i18n, knowledge,
-                  learn, logscan, parser, pipeline, recommend, report, serverkit)
+from core import (__version__, builder, communitysync, compare, contribute, crashfinder, demo, export, htmlreport, i18n, knowledge,
+                  learn, logscan, monitor, parser, pipeline, recommend, report, serverkit, stacktrace, updatecheck, updater)
 from core.i18n import _
 from core.analyzer import Analysis, compute_plan
 from core.cache import get_cache
@@ -41,6 +43,11 @@ class State:
         self.analyses: dict[str, Analysis] = {}
         self.crash: dict[str, dict] = {}  # sessions du chercheur de crash
         self.demo_dir: str | None = None
+        self.updstages: dict[str, dict] = {}   # mises à jour de mods : id d'analyse -> {dl, tested}
+        self.monitors: dict[str, "monitor.Monitor"] = {}   # surveillances de serveur en cours : id -> Monitor
+        self.uploads: dict[str, dict] = {}  # dépôts par glisser-déposer : id -> {dir, files, bytes}
+        self.desktop = False                       # vrai quand l'interface est affichée dans la fenêtre de l'application
+        self.save_dialog = None                    # fonction(nom) -> chemin choisi ou None (posée par la fenêtre)
         self.lock = threading.Lock()
 
 
@@ -91,7 +98,7 @@ def browse(path: str | None) -> dict:
                     if e.is_dir() and (not e.name.startswith(".") or e.name == ".minecraft"):
                         entries.append({"name": e.name, "path": e.path, "kind": "dir",
                                         "jars": parser.count_jars(e.path, cap=999)})
-                    elif e.is_file() and e.name.lower().endswith(".zip"):
+                    elif e.is_file() and e.name.lower().endswith((".zip", ".mrpack")):
                         entries.append({"name": e.name, "path": e.path, "kind": "zip", "jars": 0})
                 except OSError:
                     continue
@@ -186,6 +193,59 @@ def start_compare(state: State, path_a: str, path_b: str, online: bool = False, 
 
 
 # --------------------------------------------------------------------------
+# Glisser-déposer : le navigateur ne donne jamais le chemin d'un fichier déposé, il envoie donc son contenu.
+# On n'accepte que des .jar (dossier `mods/`), `logs/latest.log`, quelques fichiers de réglages (server.properties,
+# options.txt, user_jvm_args.txt, config/*) et une archive .zip/.mrpack, dans un dossier
+# temporaire à part ; ton dossier d'origine n'est jamais touché.
+# --------------------------------------------------------------------------
+
+UPLOAD_OK = re.compile(r"^(?:mods/(?:[^/]{1,120}/){0,2}[^/]{1,150}\.jar(?:\.disabled)?|logs/latest\.log|server\.properties|options\.txt|user_jvm_args\.txt|config/(?:[^/]{1,100}/){0,2}[^/]{1,100}\.(?:toml|json5?|properties|cfg)|[^/]{1,150}\.(?:zip|mrpack))$", re.I)
+UPLOAD_MAX_FILE = 2 * 1024**3
+UPLOAD_MAX_SETTING = 2 * 1024**2   # fichiers de réglages : quelques Ko en pratique
+UPLOAD_MAX_TOTAL = 6 * 1024**3
+UPLOAD_MAX_FILES = 3000
+
+
+def clean_uploads(state: State) -> None:
+    for up in list(state.uploads.values()):
+        shutil.rmtree(up["dir"], ignore_errors=True)
+    state.uploads.clear()
+
+
+def save_upload(state: State, session: str, rel: str, rfile, length: int) -> dict:
+    """Écrit un fichier déposé dans la session `session` (créée si vide) ; renvoie {session, root, path}."""
+    rel = rel.strip().replace("\\", "/")
+    parts = rel.split("/")
+    if (not UPLOAD_OK.match(rel) or any(p in ("", ".", "..") for p in parts) or any(ord(c) < 32 for c in rel)):
+        raise ValueError(_("Fichier non pris en charge : seuls les .jar, latest.log et les archives .zip/.mrpack sont acceptés."))
+    if length > (UPLOAD_MAX_FILE if re.search(r"\.(?:jar|zip|mrpack|disabled)$", rel, re.I) else UPLOAD_MAX_SETTING):
+        raise ValueError(_("Fichier trop volumineux."))
+    with state.lock:
+        if not session:
+            clean_uploads(state)
+            session = secrets.token_hex(8)
+            state.uploads[session] = {"dir": tempfile.mkdtemp(prefix="modmaestro_drop_"), "files": 0, "bytes": 0}
+        up = state.uploads.get(session)
+        if up is None:
+            raise ValueError(_("Dépôt inconnu : recommence le glisser-déposer."))
+        if up["files"] + 1 > UPLOAD_MAX_FILES or up["bytes"] + length > UPLOAD_MAX_TOTAL:
+            raise ValueError(_("Dépôt trop volumineux."))
+        up["files"] += 1
+        up["bytes"] += length
+    dest = os.path.join(up["dir"], *parts)
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    left = length
+    with open(dest, "wb") as fh:
+        while left > 0:
+            chunk = rfile.read(min(1 << 20, left))
+            if not chunk:
+                raise ValueError(_("Envoi interrompu."))
+            fh.write(chunk)
+            left -= len(chunk)
+    return {"session": session, "root": up["dir"], "path": dest}
+
+
+# --------------------------------------------------------------------------
 # HTTP
 # --------------------------------------------------------------------------
 
@@ -258,7 +318,7 @@ def make_handler(state: State):
                         kb = knowledge.load_all(cache)
                         return self._json({
                             "stats": kb["_stats"], "learned": cache.list_learned(), "cache": cache.stats(),
-                            "user_dir": knowledge.user_community_dir()})
+                            "user_dir": knowledge.user_community_dir(), "sync": communitysync.status()})
                     if path.startswith("/api/job/"):
                         job = state.jobs.get(path.rsplit("/", 1)[-1])
                         if not job:
@@ -297,7 +357,7 @@ def make_handler(state: State):
         def _index(self):
             with open(os.path.join(STATIC, "index.html"), encoding="utf-8") as fh:
                 html = fh.read()
-            cfg = json.dumps({"token": state.token, "version": __version__, "initial": state.initial_path or ""})
+            cfg = json.dumps({"token": state.token, "version": __version__, "initial": state.initial_path or "", "desktop": state.desktop})
             html = html.replace("/*__MM_CONFIG__*/{}", cfg.replace("</", "<\\/"))
             self._send(200, html.encode("utf-8"), "text/html; charset=utf-8")
 
@@ -322,6 +382,11 @@ def make_handler(state: State):
                 return None
             path = urlparse(self.path).path
             try:
+                if path == "/api/upload":
+                    q = parse_qs(urlparse(self.path).query)
+                    i18n.set_lang((q.get("lang") or [None])[0])
+                    n = int(self.headers.get("Content-Length") or 0)
+                    return self._json(save_upload(state, (q.get("session") or [""])[0], (q.get("rel") or [""])[0], self.rfile, n))
                 body = self._body()
                 lang = i18n.set_lang(body.get("lang"))
                 if path == "/api/analyze":
@@ -393,6 +458,71 @@ def make_handler(state: State):
                     a = state.analyses.get(str(body.get("analysis")))
                     ctx = {"loader": a.loader, "mc_version": a.mc_version} if a else {}
                     return self._json(contribute.build(get_cache(), body.get("ids") or None, ctx))
+                if path == "/api/updates/test":
+                    a = self._analysis(body)
+                    files = [str(f) for f in body.get("files") or []]
+                    with state.lock:
+                        stage = state.updstages.setdefault(str(body.get("analysis")), {"dl": parser._temp_dir("modmaestro_dl_"), "tested": []})
+                        while len(state.updstages) > 3:
+                            state.updstages.pop(next(iter(state.updstages)))
+                        stage["tested"] = []
+
+                    def fn(job):
+                        res = updater.test(a, files, stage["dl"], _progress(job))
+                        stage["tested"] = res["tested"]
+                        return res
+                    return self._json({"job": _run_job(state, fn, lang)})
+                if path == "/api/updates/apply":
+                    a = self._analysis(body)
+                    stage = state.updstages.get(str(body.get("analysis")))
+                    files = sorted(str(f) for f in body.get("files") or [])
+                    if not stage or stage["tested"] != files:
+                        return self._err(_("Teste d'abord la compatibilité de cette sélection."))
+                    return self._json(updater.apply(a, files, stage["dl"], str(body.get("output", ""))))
+                if path == "/api/monitor/start":
+                    a = state.analyses.get(str(body.get("analysis"))) if body.get("analysis") else None
+                    log = monitor.resolve_log(str(body.get("path", "")), a.mods_dir if a else "")
+                    jars, index = stacktrace.context(a) if a else ({}, None)
+                    mid = secrets.token_hex(6)
+                    with state.lock:
+                        while len(state.monitors) >= 4:             # au plus 4 surveillances : on retire la plus ancienne
+                            state.monitors.pop(next(iter(state.monitors)))
+                        state.monitors[mid] = monitor.Monitor(log, jars, index)
+                    return self._json({"id": mid, **state.monitors[mid].poll()})
+                if path == "/api/monitor/poll":
+                    mon = state.monitors.get(str(body.get("id")))
+                    if mon is None:
+                        return self._err(_("Surveillance inconnue : relance-la."), 400)
+                    return self._json(mon.poll())
+                if path == "/api/monitor/stop":
+                    return self._json({"stopped": state.monitors.pop(str(body.get("id")), None) is not None})
+                if path == "/api/open-external":
+                    url = str(body.get("url", ""))
+                    if not _external_ok(url):
+                        return self._err(_("Adresse non autorisée."))
+                    return self._json({"opened": bool(webbrowser.open(url))})
+                if path == "/api/desktop/save":
+                    if state.save_dialog is None:
+                        return self._err(_("Disponible seulement dans la fenêtre de l'application."))
+                    name = os.path.basename(str(body.get("name", "")).replace("\\", "/")) or "modmaestro.txt"
+                    dest = state.save_dialog(name)
+                    if not dest:
+                        return self._json({"saved": False, "path": ""})
+                    with open(dest, "w", encoding="utf-8", newline="") as fh:
+                        fh.write(str(body.get("text", "")))
+                    return self._json({"saved": True, "path": dest})
+                if path == "/api/update/check":
+                    return self._json(updatecheck.check())
+                if path == "/api/community/update":
+                    return self._json(communitysync.update())
+                if path == "/api/community/reset":
+                    return self._json({"removed": communitysync.reset()})
+                if path == "/api/falsepositive":
+                    a = self._analysis(body)
+                    rep = contribute.build_false_report(a, str(body.get("id", "")), str(body.get("note", "")))
+                    if body.get("ignore"):
+                        learn.ignore_all(get_cache(), [str(body.get("id", ""))], str(body.get("note", ""))[:200])
+                    return self._json(rep)
                 if path == "/api/learn":
                     return self._json({"item": self._learn(body)})
                 if path == "/api/learn/delete":
@@ -429,7 +559,8 @@ def make_handler(state: State):
                     findings = logscan.scan_text(text)
                     a = state.analyses.get(str(body.get("analysis")))
                     installed = [{"modid": m["modid"], "side": m["side"]} for m in a.to_dict()["mods"]] if a else []
-                    return self._json({"findings": findings, "chars": len(text),
+                    trace = stacktrace.from_analysis(a, text) if a else stacktrace.attribute(text)
+                    return self._json({"findings": findings, "chars": len(text), "root": trace["root"], "suspects": trace["suspects"],
                                        "suggestions": learn.suggest(findings, installed)})
                 return self._err(_("Introuvable."), 404)
             except (ValueError, FileExistsError, PermissionError, json.JSONDecodeError) as exc:
@@ -445,6 +576,14 @@ def make_handler(state: State):
     return Handler
 
 
+def _external_ok(url: str) -> bool:
+    """Seules les adresses https:// sans identifiant ni caractère de contrôle s'ouvrent dans le navigateur du système."""
+    if not url or len(url) > 2000 or any(ord(c) < 33 or ord(c) == 127 for c in url):
+        return False
+    u = urlparse(url)
+    return u.scheme == "https" and bool(u.hostname) and "@" not in u.netloc
+
+
 def _free_port(preferred: int) -> int:
     for port in [preferred] + list(range(preferred + 1, preferred + 30)) + [0]:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -458,11 +597,17 @@ def _free_port(preferred: int) -> int:
     raise OSError(_("Aucun port libre."))
 
 
-def serve(initial_path: str | None = None, port: int = 8765, open_browser: bool = True) -> None:
+def start(initial_path: str | None = None, port: int = 8765, desktop: bool = False):
+    """Prépare le serveur local (sans le lancer). Renvoie (serveur, état, adresse)."""
     state = State(initial_path)
+    state.desktop = desktop
     state.port = _free_port(port)
     httpd = ThreadingHTTPServer(("127.0.0.1", state.port), make_handler(state))
-    url = f"http://127.0.0.1:{state.port}/"
+    return httpd, state, f"http://127.0.0.1:{state.port}/"
+
+
+def serve(initial_path: str | None = None, port: int = 8765, open_browser: bool = True) -> None:
+    httpd, state, url = start(initial_path, port)
     print("\n  " + _("ModMaestro {version} — interface disponible sur {url}", version=__version__, url=url))
     print("  " + _("(Ctrl+C pour arrêter)") + "\n")
     if open_browser:
@@ -473,3 +618,4 @@ def serve(initial_path: str | None = None, port: int = 8765, open_browser: bool 
         print("\n  " + _("À bientôt !"))
     finally:
         httpd.server_close()
+        clean_uploads(state)

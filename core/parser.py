@@ -14,7 +14,9 @@ from __future__ import annotations
 import contextvars
 import io
 import json
+import atexit
 import os
+import shutil
 import re
 import tempfile
 import zipfile
@@ -107,7 +109,7 @@ def count_jars(folder: str, cap: int = 9999) -> int:
     return n
 
 
-def resolve_source(path: str) -> tuple[str, list[str]]:
+def resolve_source(path: str, online: bool = False, progress=None) -> tuple[str, list[str]]:
     """Retourne (dossier contenant les .jar, notes).
 
     Accepte : un dossier `mods`, la racine d'une instance (qui contient `mods/`),
@@ -120,7 +122,7 @@ def resolve_source(path: str) -> tuple[str, list[str]]:
 
     if os.path.isfile(path):
         if path.lower().endswith((".zip", ".mrpack")):
-            return _extract_zip(path)
+            return _extract_zip(path, online, progress)
         if path.lower().endswith(".jar"):
             return os.path.dirname(path), [_("Un seul fichier .jar a été donné : analyse du dossier qui le contient.")]
         raise ValueError(_("Choisis un dossier de mods ou une archive .zip."))
@@ -138,31 +140,27 @@ def resolve_source(path: str) -> tuple[str, list[str]]:
     ))
 
 
-def _extract_zip(path: str) -> tuple[str, list[str]]:
-    notes: list[str] = []
+_TEMP_DIRS: list[str] = []
+
+
+def _temp_dir(prefix: str) -> str:
+    """Dossier temporaire supprimé à la fermeture du programme."""
+    d = tempfile.mkdtemp(prefix=prefix)
+    if not _TEMP_DIRS:
+        atexit.register(lambda: [shutil.rmtree(x, ignore_errors=True) for x in _TEMP_DIRS])
+    _TEMP_DIRS.append(d)
+    return d
+
+
+def _extract_zip(path: str, online: bool = False, progress=None) -> tuple[str, list[str]]:
+    """Archive .zip / .mrpack / zip CurseForge : voir core.packimport."""
+    from . import packimport
+    out = _temp_dir("modmaestro_zip_")
     try:
-        zf = zipfile.ZipFile(path)
-    except zipfile.BadZipFile as exc:
-        raise ValueError(_("Cette archive est corrompue ou n'est pas un zip valide.")) from exc
-    with zf:
-        members = [
-            n for n in zf.namelist()
-            if re.search(r"(^|/)mods/[^/]+\.jar$", n, re.IGNORECASE)
-        ]
-        if not members:
-            names = set(zf.namelist())
-            if "manifest.json" in names or "modrinth.index.json" in names:
-                raise ValueError(_(
-                    "Ce zip ne contient que la liste des mods (manifest), pas les .jar eux-mêmes. "
-                    "Installe le modpack avec ton launcher, puis choisis le dossier `mods` de l'instance."
-                ))
-            raise ValueError(_("Aucun dossier `mods/` contenant des .jar dans cette archive."))
-        out = tempfile.mkdtemp(prefix="modmaestro_zip_")
-        for name in members:
-            target = os.path.join(out, os.path.basename(name))
-            with zf.open(name) as src, open(target, "wb") as dst:
-                dst.write(src.read())
-        notes.append(_("{n} jar extraits de l'archive vers un dossier temporaire.", n=len(members)))
+        _kind, notes = packimport.extract_pack(path, out, online=online, progress=progress)
+    except Exception:
+        shutil.rmtree(out, ignore_errors=True)
+        raise
     return out, notes
 
 

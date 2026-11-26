@@ -61,6 +61,16 @@
     $$("[data-lang]").forEach((b) => b.addEventListener("click", () => setLanguage(b.dataset.lang)));
     applyMotion();
 
+    $("#update-check").addEventListener("click", async () => {
+      try {
+        const r = await api("/api/update/check", {});
+        if (!r.latest) return toast(t("Aucune Release publiée pour l'instant."));
+        if (!r.newer) return toast(t("Tu as la dernière version ({v}).", { v: r.current }));
+        const notes = r.notes ? `<pre class="mono" style="white-space:pre-wrap;max-height:240px;overflow:auto">${esc(r.notes)}</pre>` : "";
+        X.dialog(t("Nouvelle version disponible"), `<p>${t("Version {v} disponible (tu as la {c}).", { v: esc(r.latest), c: esc(r.current) })}</p><p class="muted">${t("Tes réglages et ta base personnelle sont conservés : remplace simplement l'ancien fichier par le nouveau.")}</p>${notes}`,
+          `${r.asset ? `<a class="btn primary" href="${esc(r.asset.url)}" target="_blank" rel="noopener noreferrer">${t("Télécharger {name}", { name: esc(r.asset.name) })}${r.asset.size ? ` (${X.size(r.asset.size)})` : ""}</a>` : ""}<a class="btn${r.asset ? "" : " primary"}" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${t("Ouvrir la page de téléchargement")} ↗</a>`);
+      } catch (e) { toast(e.message); }
+    });
     $("#modal-close").addEventListener("click", closeBrowser);
     $("#modal").addEventListener("click", (e) => { if (e.target.id === "modal") closeBrowser(); });
     $("#dlg").addEventListener("click", (e) => { if (e.target.id === "dlg") X.closeDialog(); });

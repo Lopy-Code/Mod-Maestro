@@ -544,3 +544,18 @@ textarea.input[readonly] { width: 100%; box-sizing: border-box; resize: vertical
 @media (max-width: 760px) { .tips { grid-template-columns: 1fr; } .seg { min-width: 70px; } .pathrow { flex-wrap: wrap; } .sidebar-foot .ghost-btn span { display: none; } }
 .cmp-head .chip { align-self: flex-start; }
 @media (max-width: 760px) { .crumbs { flex: 1 1 100%; min-width: 0; } .crumb-title { white-space: normal; } .topbar-actions { width: 100%; } .topbar-actions .btn { flex: 1; } }
+a.btn { text-decoration: none; }
+
+/* Glisser-déposer */
+.drop-veil { position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; background: color-mix(in srgb, var(--bg) 82%, transparent); backdrop-filter: blur(6px); }
+.drop-veil[hidden] { display: none; }
+.drop-box { display: grid; gap: 6px; text-align: center; padding: 38px 54px; border: 2px dashed var(--accent); border-radius: 22px; background: var(--panel); max-width: min(560px, 90vw); }
+.drop-box b { font-family: var(--serif, inherit); font-size: 20px; }
+.drop-box span { color: var(--ink-3); font-size: 13.5px; overflow-wrap: anywhere; }
+#mon-out > .chips { margin-top: 18px; }
+
+/* Mise à jour des mods */
+.upd-row { display: grid; gap: 6px; padding: 12px 0; border-bottom: 1px solid var(--line, rgba(0,0,0,.08)); }
+.upd-row:last-of-type { border-bottom: 0; }
+.upd-problems { margin: 0 0 0 26px; padding-left: 16px; color: var(--ink-3); font-size: 13.5px; }
+.chip.warn { background: color-mix(in srgb, #d99a2b 22%, transparent); color: inherit; }

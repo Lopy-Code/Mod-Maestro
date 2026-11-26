@@ -16,8 +16,8 @@
   const SEV = () => ({ error: t("Erreur"), warning: t("Avertissement"), info: t("Info") });
   const SIDE = () => ({ client: t("Client"), server: t("Serveur"), both: t("Les deux"), unsure: t("À vérifier") });
   const CATS = () => [["all", t("Tout")], ["duplicates", t("Doublons")], ["dependencies", t("Dépendances")],
-    ["versions", t("Versions")], ["compat", t("Compatibilité")], ["updates", t("Mises à jour")], ["files", t("Fichiers")]];
-  const PHASE = () => ({ scan: t("Lecture des fichiers"), hash: t("Calcul des empreintes"), query: t("Interrogation de Modrinth"),
+    ["versions", t("Versions")], ["compat", t("Compatibilité")], ["updates", t("Mises à jour")], ["config", t("Configuration")], ["files", t("Fichiers")]];
+  const PHASE = () => ({ scan: t("Lecture des fichiers"), download: t("Téléchargement des mods du pack"), hash: t("Calcul des empreintes"), query: t("Interrogation de Modrinth"),
     projects: t("Récupération des fiches Modrinth"), updates: t("Recherche de mises à jour") });
   const safeUrl = (u) => (/^https:\/\//.test(u || "") ? u : "#");
   X.safeUrl = safeUrl;
@@ -148,7 +148,8 @@
             ${updatesTable(i.data && i.data.updates)}
             <div class="issue-actions">${i.ignored
               ? `<button class="btn sm" data-act="unignore" data-id="${esc(i.id)}">${t("Ne plus ignorer")}</button>`
-              : (i.severity !== "info" ? `<button class="btn sm" data-act="ignore" data-id="${esc(i.id)}" title="${t("C'est une fausse alerte : ModMaestro ne la signalera plus pour ce pack.")}">${t("Ignorer cette alerte")}</button>` : "")}</div>
+              : (i.severity !== "info" ? `<button class="btn sm" data-act="ignore" data-id="${esc(i.id)}" title="${t("C'est une fausse alerte : ModMaestro ne la signalera plus pour ce pack.")}">${t("Ignorer cette alerte")}</button>
+                <button class="btn sm" data-act="false-diag" data-id="${esc(i.id)}" title="${t("Prépare un rapport anonyme à proposer à la communauté.")}">${t("Ce diagnostic est faux")}</button>` : "")}</div>
           </div></details>`;
       const empty = `<div class="empty"><img src="/assets/illustrations/ok.svg" alt=""><h3>${S.filter === "all" ? t("Rien à signaler") : t("Rien dans cette catégorie")}</h3>
         <p>${S.filter === "all" ? t("Aucun doublon, aucune dépendance manquante, aucune incompatibilité détectée.") : t("Cette catégorie est propre.")}</p></div>`;
@@ -360,6 +361,14 @@
           <div class="why">${kindLabel(r)}${r.kind === "conflict" ? ` · ${SEV()[r.severity] || ""}` : ""}${r.note ? ` · ${esc(r.note)}` : ""}</div></div>
           <span class="chip">${r.source === "import" ? t("importé") : t("à toi")}</span>
           <button class="btn sm" data-act="ldel" data-id="${r.id}">${t("Supprimer")}</button></div>`).join("")}</div>` : "";
+      const sy = kb && kb.sync, last = sy && sy.last;
+      const syncCard = kb ? `<div class="build-card">
+          <h3 class="card-title">${t("Mettre à jour la base communautaire")}</h3>
+          <p class="muted">${t("Télécharge les nouvelles entrées du dépôt du projet. Seuls des fichiers de données sont récupérés, et chacun est vérifié avant d'être gardé. Rien ne se fait sans ton clic.")}</p>
+          <div class="build-line"><button class="btn primary" data-act="sync-update" ${sy && sy.configured && !S.syncBusy ? "" : "disabled"}>${S.syncBusy ? t("Téléchargement…") : t("Mettre à jour")}</button>
+            ${last ? `<button class="btn" data-act="sync-reset">${t("Retirer les mises à jour")}</button>` : ""}
+            <span class="hint" style="margin:0">${sy && !sy.configured ? t("Le dépôt du projet n'est pas configuré dans cette version.") : last ? t("Dernière mise à jour : {date} — {s} mods, {c} conflits", { date: esc(last.date), s: last.sides, c: last.conflicts }) : t("Aucune mise à jour téléchargée pour l'instant.")}</span></div>
+          ${S.syncMsg ? `<div class="hint" style="margin:0">${esc(S.syncMsg)}</div>` : ""}</div>` : "";
       return `
       <section>
         <div class="logs-head"><div><h2>${t("Ma base de connaissances")}</h2>
@@ -388,6 +397,7 @@
             ${S.learnOk && !S.a ? `<span class="hint" style="margin:0">${t("Enregistré : il sera pris en compte à ta prochaine analyse.")}</span>` : ""}</div>
         </div>
         ${learned}
+        ${syncCard}
         <div class="build-card">
           <h3 class="card-title">${t("Proposer à la communauté")}</h3>
           <p class="muted">${t("Tu as découvert un conflit ou un mod client ? Propose-le : ModMaestro prépare un message prêt à publier sur le dépôt du projet. Rien n'est envoyé sans que tu le publies toi-même.")}</p>
@@ -419,6 +429,19 @@
   });
   act("reanalyze", () => analyze(S.a.source));
   act("cand", (el) => { const f = S.learnForm, c = el.dataset.v; if (f.kind === "conflict" && f.a && !f.b && f.a !== c) f.b = c; else f.a = c; refresh(); });
+  act("sync-update", async () => {
+    S.syncBusy = true; S.syncMsg = ""; refresh();
+    try {
+      const r = await api("/api/community/update", {});
+      S.syncMsg = tn(r.added_sides + r.added_conflicts, "{n} nouvelle entrée ajoutée", "{n} nouvelles entrées ajoutées") + (r.skipped.length ? " · " + tn(r.skipped.length, "{n} fichier invalide ignoré", "{n} fichiers invalides ignorés") : "");
+      toast(t("Base communautaire à jour"));
+    } catch (e) { S.syncMsg = ""; toast(e.message); }
+    S.syncBusy = false; await loadKb();
+  });
+  act("sync-reset", async () => {
+    try { await api("/api/community/reset", {}); S.syncMsg = t("Mises à jour retirées : il reste la base fournie avec ModMaestro."); } catch (e) { toast(e.message); }
+    await loadKb();
+  });
   act("ldel", async (el) => { try { await api("/api/learn/delete", { id: Number(el.dataset.id) }); toast(t("Supprimé")); } catch (e) { toast(e.message); } loadKb(); });
   act("lexport", async () => { try { const { bundle } = await api("/api/learn/export", {}); download(JSON.stringify(bundle, null, 2), "modmaestro-ma-base.json", "application/json"); toast(t("Base exportée")); } catch (e) { toast(e.message); } });
   async function importBase(file) {
@@ -445,17 +468,46 @@
     } catch (e) { toast(e.message); }
   });
   act("copy-contrib", () => copy($("#contrib-text").value));
+
+  /* « Ce diagnostic est faux » : rapport anonyme (aucun nom de fichier ni chemin), publié par l'utilisateur lui-même. */
+  act("false-diag", (el) => {
+    const id = el.dataset.id;
+    dialog(t("Ce diagnostic est faux"),
+      `<p class="muted">${t("ModMaestro prépare un message anonyme pour la communauté : le type d'alerte, les identifiants des mods concernés, le loader et la version de Minecraft. Jamais de chemin ni de nom de fichier. Rien n'est envoyé : tu relis puis tu publies toi-même.")}</p>
+       <textarea class="input" id="fd-note" rows="4" maxlength="1000" placeholder="${t("Que se passe-t-il réellement ? (facultatif, une phrase suffit)")}"></textarea>
+       <label class="check" style="margin-top:12px"><input type="checkbox" id="fd-ignore"> <span>${t("Aussi ignorer cette alerte pour ce pack")}</span></label>`,
+      `<button class="btn primary" data-act="false-diag-go" data-id="${esc(id)}">${t("Préparer le rapport")}</button>`);
+  });
+  act("false-diag-go", async (el) => {
+    const note = ($("#fd-note") || {}).value || "", ign = !!($("#fd-ignore") || {}).checked;
+    try {
+      const r = await api("/api/falsepositive", { analysis: S.a && S.a.id, id: el.dataset.id, note, ignore: ign });
+      const link = r.url ? `<a class="btn primary" href="${esc(safeUrl(r.url))}" target="_blank" rel="noopener noreferrer">${t("Ouvrir sur GitHub")} ↗</a>`
+        : `<span class="hint" style="margin:0">${t("Le dépôt du projet n'est pas configuré dans cette version : copie le message et publie-le où tu veux.")}</span>`;
+      dialog(t("Rapport prêt"), `<p class="muted">${r.url && !r.body_in_url ? t("Le message est long : le lien ouvre une page vide, colle-y le message copié.") : t("Relis-le avant de le publier : il ne contient aucun chemin ni nom de fichier.")}</p>
+        <textarea class="input mono" readonly rows="14" id="contrib-text">${esc(r.body)}</textarea>`,
+        `<button class="btn" data-act="copy-contrib">${t("Copier le message")}</button>${link}`);
+      if (ign) await reanalyze();
+    } catch (e) { toast(e.message); }
+  });
   act("close-dialog", closeDialog);
 
   /* ---- Journal de crash (lecture du log) — la recherche par essais est dans views-new.js ------------------------------ */
   X.logsSection = function logsSection() {
     const L = S.logs, found = (S.a && S.a.logs) || [];
+    const sus = L.suspects || [];
+    const confLabel = { certain: t("sûr"), likely: t("probable"), heuristic: t("possible") };
+    const suspectsHtml = L.findings !== null && sus.length ? `<div class="build-card" style="margin-top:22px"><h3 class="card-title">${t("Mod(s) suspect(s) d'après la pile d'erreur")}</h3>
+      ${L.root ? `<p class="muted mono" style="overflow-wrap:anywhere">${esc(L.root)}</p>` : ""}
+      <div class="stack" style="gap:10px">${sus.map((m) => `<div><b>${esc(m.name)}</b> <span class="chip ${m.confidence === "heuristic" ? "" : "accent"}">${confLabel[m.confidence]}</span>
+        ${m.file ? `<span class="chip mono">${esc(m.file)}</span>` : ""}<div class="hint" style="margin:4px 0 0">${m.evidence.map(esc).join(" · ")}</div></div>`).join("")}</div>
+      <p class="hint" style="margin:12px 0 0">${t("Un mod qui apparaît dans la pile n'est pas forcément le coupable (il peut seulement être touché par l'erreur d'un autre). Pour en être sûr, utilise « Trouver le mod fautif ».")}</p></div>` : "";
     const results = L.findings === null ? "" : L.findings.length ? `<div class="issues" style="margin-top:22px">${L.findings.map((f, idx) => `
       <details class="issue ${f.severity}" open><summary><span class="sev" title="${SEV()[f.severity]}">${ICON[f.severity]}</span>
         <div class="issue-main"><div class="issue-title">${esc(f.title)}</div><div class="issue-msg">${esc(f.message)}</div></div>${ICON.caret}</summary>
         <div class="issue-body">${f.fix ? `<div class="fix"><b>${t("À faire :")}</b> ${esc(f.fix)}</div>` : ""}
         ${(L.suggestions || []).some((x) => x.finding === idx) ? `<div><button class="btn sm" data-act="sugg" data-i="${idx}">${t("Enregistrer dans ma base…")}</button></div>` : ""}</div></details>`).join("")}</div>`
-      : `<div class="empty"><img src="/assets/illustrations/ok.svg" alt=""><h3>${t("Aucun problème reconnu")}</h3><p>${t("Ce journal ne contient aucune des erreurs courantes que ModMaestro sait lire. Colle plutôt le crash-report complet, ou essaie la recherche par essais.")}</p></div>`;
+      : sus.length ? "" : `<div class="empty"><img src="/assets/illustrations/ok.svg" alt=""><h3>${t("Aucun problème reconnu")}</h3><p>${t("Ce journal ne contient aucune des erreurs courantes que ModMaestro sait lire. Colle plutôt le crash-report complet, ou essaie la recherche par essais.")}</p></div>`;
     return `<div class="logs-head"><div><h2>${t("Pourquoi ça plante ?")}</h2>
       <p>${t("Colle ici le contenu de latest.log ou d'un crash-report. ModMaestro y cherche les causes les plus courantes : dépendance manquante, doublon, mod client sur serveur, mauvaise version de Java, mémoire…")}</p></div><img src="/assets/illustrations/logs.svg" alt=""></div>
       <div class="stack">
@@ -464,12 +516,12 @@
         <textarea class="input mono" data-model="logs.text" placeholder="${t("…ou colle le texte du journal ici")}" spellcheck="false">${esc(L.text)}</textarea>
         ${L.error ? `<div class="err-box" style="margin:0">${esc(L.error)}</div>` : ""}
         <div><button class="btn primary" data-act="scanlog">${t("Analyser le journal")}</button></div>
-      </div>${results}`;
+      </div>${suspectsHtml}${results}`;
   };
   async function scanLog() {
     const L = S.logs; L.error = "";
     if (!L.text.trim() && !L.path) { L.error = t("Colle un journal ou indique son chemin."); return refresh(); }
-    try { const r = await api("/api/logscan", { ...(L.text.trim() ? { text: L.text } : { path: L.path }), analysis: S.a && S.a.id }); L.findings = r.findings; L.suggestions = r.suggestions || []; }
+    try { const r = await api("/api/logscan", { ...(L.text.trim() ? { text: L.text } : { path: L.path }), analysis: S.a && S.a.id }); L.findings = r.findings; L.suggestions = r.suggestions || []; L.suspects = r.suspects || []; L.root = r.root || ""; }
     catch (e) { L.error = e.message; L.findings = null; }
     refresh();
   }

@@ -173,4 +173,6 @@ EN = {
     'Indique les deux dossiers à comparer.': 'Enter the two folders to compare.',
     'Session inconnue : recommence la recherche.': 'Unknown session: start the search again.',
     'Tâche inconnue.': 'Unknown task.',
+    "Téléchargement des mods du pack": "Downloading the pack's mods",
+    "ouvre l'interface dans le navigateur plutôt que dans la fenêtre de l'application": "open the interface in the browser instead of the application window",
 }

@@ -1,6 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 # PyInstaller : un seul fichier exécutable, sans Python à installer.
 #   python tools/build_binaries.py        (ou : pyinstaller ModMaestro.spec)
+import importlib.util
 import os
 import sys
 
@@ -17,7 +18,7 @@ a = Analysis(
     pathex=[ROOT],
     datas=datas,
     # `rich` est facultatif : s'il est installé au moment de la compilation, le menu terminal est plus joli.
-    hiddenimports=["sqlite3", "tomllib", "core.i18n_en", "core.en.analysis", "core.en.engine", "core.en.cli", "core.en.misc"],
+    hiddenimports=(["webview"] if importlib.util.find_spec("webview") else []) + ["sqlite3", "tomllib", "core.i18n_en", "core.en.analysis", "core.en.engine", "core.en.cli", "core.en.misc"],
     excludes=["tkinter", "unittest", "pydoc", "test"],
     noarchive=False,
 )
@@ -33,6 +34,8 @@ exe = EXE(
     debug=False,
     strip=False,
     upx=False,
-    console=True,  # la console affiche l'adresse de l'interface et permet d'arrêter avec Ctrl+C
+    # Windows : pas de fenêtre noire derrière l'application (le terminal appelant est rattaché pour les options --audit, etc.).
+    # Linux / macOS : la console affiche l'adresse de l'interface et permet d'arrêter avec Ctrl+C.
+    console=sys.platform != "win32",
     icon=os.path.join(ROOT, "assets", "favicon.ico") if sys.platform == "win32" else None,
 )

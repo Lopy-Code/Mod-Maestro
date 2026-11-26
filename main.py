@@ -120,7 +120,7 @@ class UI:
 
     def run(self, path, online=False):
         """Lance l'analyse (pipeline commun avec l'interface web) avec une barre de progression."""
-        labels = {"scan": _("Lecture des mods"), "hash": _("Calcul des empreintes"), "query": _("Interrogation de Modrinth"),
+        labels = {"scan": _("Lecture des mods"), "download": _("Téléchargement des mods du pack"), "hash": _("Calcul des empreintes"), "query": _("Interrogation de Modrinth"),
                   "projects": _("Fiches Modrinth"), "updates": _("Mises à jour")}
         if not self.c:
             last = {"stage": None}
@@ -643,12 +643,15 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--import-kb", metavar=_("FICHIER"), help=_("importe une base .json (rien n'est envoyé nulle part)"))
     ap.add_argument("--port", type=int, default=8765, help=_("port de l'interface web (défaut : 8765)"))
     ap.add_argument("--no-browser", action="store_true", help=_("ne pas ouvrir le navigateur automatiquement"))
+    ap.add_argument("--browser", action="store_true", help=_("ouvre l'interface dans le navigateur plutôt que dans la fenêtre de l'application"))
     ap.add_argument("--version", action="version", version=f"ModMaestro {__version__}")
     return ap
 
 
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    from web import desktop
+    desktop.prepare_console()
     i18n.set_lang(pick_lang(argv))
     ap = build_parser()
     args = ap.parse_args(argv)
@@ -694,7 +697,10 @@ def main(argv=None) -> int:
     if args.cli:
         return cli_menu(path, args.online) or 0
 
+    from web import desktop
     from web.server import serve
+    if not (args.no_browser or args.browser) and desktop.run(path, args.port):
+        return 0                                        # fenêtre de l'application ; sinon : navigateur
     serve(initial_path=path, port=args.port, open_browser=not args.no_browser)
     return 0
 
